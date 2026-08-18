@@ -13,6 +13,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_HiDpi",
     "Win32_Globalization",
     "Win32_UI_Shell",
+    "Win32_Security_Cryptography",
 ] }
 image = { version = "0.25", default-features = false, features = ["png", "webp"] }
 tray-icon = "0.24"

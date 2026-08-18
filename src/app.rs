@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use crate::animation::{AmbientTimer, Animator};
 use crate::config::Config;
+use crate::integration::{AgentEventKind, AppUserEvent, IntegrationServer};
 use crate::locale::Locale;
 use crate::pet::codex::CodexPetProvider;
 use crate::pet::model::{Animation, PetAnimation, SpriteRect};
@@ -335,7 +336,7 @@ fn try_load_pet(preferred_id: &str) -> Option<Box<dyn PetProvider>> {
     None
 }
 
-impl ApplicationHandler for PetApp {
+impl ApplicationHandler<AppUserEvent> for PetApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return; // already initialised
@@ -516,6 +517,33 @@ impl ApplicationHandler for PetApp {
         }
     }
 
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppUserEvent) {
+        match event {
+            AppUserEvent::Agent(event) => {
+                tracing::info!(
+                    source = %event.source,
+                    event = %event.event,
+                    session_id = event.session_id.as_deref().unwrap_or(""),
+                    "Received coding-tool event"
+                );
+                let animation = match event.kind() {
+                    AgentEventKind::Idle => Some(PetAnimation::Idle),
+                    AgentEventKind::Working => Some(PetAnimation::Running),
+                    AgentEventKind::Reviewing => Some(PetAnimation::Review),
+                    AgentEventKind::Waiting => Some(PetAnimation::Waiting),
+                    AgentEventKind::Succeeded => Some(PetAnimation::Waving),
+                    AgentEventKind::Failed => Some(PetAnimation::Failed),
+                    AgentEventKind::Unknown => None,
+                };
+                if let Some(animation) = animation {
+                    self.play_animation(animation);
+                } else {
+                    tracing::debug!("No animation mapping for event: {}", event.event);
+                }
+            }
+        }
+    }
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         // Process tray/context menu events
         while let Some(menu_event) = check_menu_event() {
@@ -617,8 +645,16 @@ fn generate_test_spritesheet(total_width: u32, height: u32) -> Vec<u8> {
 /// Public helper so main.rs can launch the event loop.
 pub fn run() -> Result<(), crate::error::AppError> {
     let config = Config::load();
-    let event_loop =
-        EventLoop::new().map_err(|e| crate::error::AppError::Window(e.to_string()))?;
+    let event_loop = EventLoop::<AppUserEvent>::with_user_event()
+        .build()
+        .map_err(|e| crate::error::AppError::Window(e.to_string()))?;
+    let _integration_server = match IntegrationServer::start(event_loop.create_proxy()) {
+        Ok(server) => Some(server),
+        Err(error) => {
+            tracing::warn!("Integration API could not start: {error}");
+            None
+        }
+    };
     let mut app = PetApp::new(&config);
     event_loop
         .run_app(&mut app)

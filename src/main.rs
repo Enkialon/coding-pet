@@ -4,6 +4,7 @@ mod animation;
 mod app;
 mod config;
 mod error;
+mod integration;
 mod locale;
 mod pet;
 mod renderer;
@@ -11,6 +12,15 @@ mod tray;
 mod window;
 
 fn main() {
+    match integration::try_run_cli() {
+        integration::CliOutcome::NotCli => {}
+        integration::CliOutcome::Handled(Ok(())) => return,
+        integration::CliOutcome::Handled(Err(message)) => {
+            eprintln!("CodingPet: {message}");
+            std::process::exit(2);
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

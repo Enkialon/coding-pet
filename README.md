@@ -18,6 +18,7 @@ CodingPet is an extremely lightweight programmer's desktop pet. It is compatible
 - Random ambient animations (wave/jump)
 - Configuration persistence
 - Event-driven (near-zero idle CPU)
+- Local integration API for Codex and other coding tools
 
 ## Build
 
@@ -42,6 +43,20 @@ For debug logging:
 set RUST_LOG=debug
 coding-pet.exe
 ```
+
+## Coding-tool integrations
+
+CodingPet exposes a token-protected HTTP API on a random loopback port and includes a generic
+event emitter for hooks:
+
+```powershell
+coding-pet.exe emit agent.turn.started --source codex --session turn-123
+coding-pet.exe emit agent.turn.completed --source codex --session turn-123
+```
+
+Codex, Claude Code, Cursor, IDE, Git, and CI adapters all translate their native lifecycle events
+into the same versioned event envelope. See [Integration Protocol v1](docs/integrations.md) for
+the event catalog, HTTP contract, security model, and adapter rules.
 
 ## Codex Pet Import
 
@@ -98,7 +113,7 @@ Unknown fields are ignored for forward compatibility.
 
 ## Configuration
 
-Config file location: `%APPDATA%\CodingPet\config.json`
+Config file location: `%APPDATA%\CodingPet\config\config.json`
 
 ```json
 {
@@ -132,7 +147,7 @@ Missing or corrupt configuration is automatically reset to defaults.
 
 ## Roadmap
 
-- **V0.2**: Windows Named Pipe IPC, unified Agent Event system, Codex/Cursor/Claude Code completion notifications
+- **V0.2**: Provider adapters and configurable event-to-animation mappings
 - **V0.3**: AI task status display (running/needs input/completed/failed), Toast notifications
 - **V0.4**: Break reminders (sitting, water, eyes, wrist)
 - **V0.5**: Custom event mapping, settings UI, plugin/adapter system

@@ -97,6 +97,7 @@ mod tests {
             scale: 1.0,
             always_on_top: false,
             idle_animation: true,
+            language: "auto".to_string(),
         };
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
