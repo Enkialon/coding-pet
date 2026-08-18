@@ -111,7 +111,7 @@ impl PetTray {
         context_menu.append(&menu_exit_ctx)?;
 
         // -- Create tray icon --
-        let icon = create_default_icon()?;
+        let icon = load_app_icon()?;
         let _tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_icon(icon)
@@ -170,34 +170,21 @@ pub fn check_menu_event() -> Option<MenuEvent> {
     MenuEvent::receiver().try_recv().ok()
 }
 
-/// Create a simple 16×16 RGBA icon (a small colored paw-like square).
-fn create_default_icon() -> Result<Icon, Box<dyn std::error::Error>> {
-    const SIZE: u32 = 16;
-    let mut rgba = vec![0u8; (SIZE * SIZE * 4) as usize];
+/// Load the project icon embedded in the executable and resize it for the tray.
+fn load_app_icon() -> Result<Icon, Box<dyn std::error::Error>> {
+    const TRAY_ICON_SIZE: u32 = 32;
+    let source = image::load_from_memory(include_bytes!("../icon.png"))?;
+    let rgba = source
+        .resize_exact(
+            TRAY_ICON_SIZE,
+            TRAY_ICON_SIZE,
+            image::imageops::FilterType::Lanczos3,
+        )
+        .into_rgba8();
 
-    // Draw a small colored pattern: a warm orange circle on transparent background
-    let cx = SIZE as f64 / 2.0;
-    let cy = SIZE as f64 / 2.0;
-    let radius = 6.0_f64;
-
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let dx = x as f64 - cx + 0.5;
-            let dy = y as f64 - cy + 0.5;
-            let dist = (dx * dx + dy * dy).sqrt();
-            let idx = ((y * SIZE + x) * 4) as usize;
-
-            if dist <= radius {
-                let edge = ((radius - dist).min(1.0)).max(0.0);
-                let alpha = (255.0 * edge) as u8;
-                // Warm orange: R=240, G=160, B=80
-                rgba[idx] = 240;
-                rgba[idx + 1] = 160;
-                rgba[idx + 2] = 80;
-                rgba[idx + 3] = alpha;
-            }
-        }
-    }
-
-    Ok(Icon::from_rgba(rgba, SIZE, SIZE)?)
+    Ok(Icon::from_rgba(
+        rgba.into_raw(),
+        TRAY_ICON_SIZE,
+        TRAY_ICON_SIZE,
+    )?)
 }
