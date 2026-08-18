@@ -464,11 +464,10 @@ impl ApplicationHandler for PetApp {
     ) {
         match event {
             WindowEvent::CloseRequested => {
-                tracing::info!("Close requested — hiding window instead of exiting");
-                self.visible = false;
-                if let Some(win) = &self.window {
-                    win.window.set_visible(false);
-                }
+                // The tray menu is the single place that explicitly exits or
+                // hides the pet. Ignore OS close requests (for example Alt+F4)
+                // so the desktop pet and tray icon remain visible.
+                tracing::info!("Close requested — keeping desktop pet running");
             }
             WindowEvent::RedrawRequested => {
                 if let Some(renderer) = self.renderer.as_ref() {

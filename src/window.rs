@@ -5,6 +5,7 @@
 // Adds drag support, multi-monitor position validation, and DPI queries.
 
 use winit::event_loop::ActiveEventLoop;
+use winit::platform::windows::WindowAttributesExtWindows;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -34,6 +35,10 @@ impl PetWindow {
         let attrs = winit::window::WindowAttributes::default()
             .with_inner_size(winit::dpi::PhysicalSize::new(width, height))
             .with_decorations(false)
+            // A desktop pet is controlled from the tray, not the taskbar.
+            // Set this before creating the HWND so Windows never adds a
+            // transient taskbar button for it.
+            .with_skip_taskbar(true)
             // Note: We do NOT use with_transparent(true) because transparency
             // is managed by UpdateLayeredWindow + WS_EX_LAYERED in the renderer.
             .with_visible(true);
