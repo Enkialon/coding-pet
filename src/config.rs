@@ -13,6 +13,9 @@ pub struct Config {
     pub always_on_top: bool,
     #[serde(default = "default_true")]
     pub idle_animation: bool,
+    /// Language setting: "auto" (system default), "zh", or "en".
+    #[serde(default = "default_lang")]
+    pub language: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -24,6 +27,7 @@ pub struct Position {
 fn default_pet() -> String { String::new() }
 fn default_scale() -> f64 { 0.75 }
 fn default_true() -> bool { true }
+fn default_lang() -> String { "auto".to_string() }
 
 impl Default for Config {
     fn default() -> Self {
@@ -33,6 +37,7 @@ impl Default for Config {
             scale: default_scale(),
             always_on_top: true,
             idle_animation: true,
+            language: default_lang(),
         }
     }
 }

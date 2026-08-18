@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use crate::animation::{AmbientTimer, Animator};
 use crate::config::Config;
+use crate::locale::Locale;
 use crate::pet::codex::CodexPetProvider;
 use crate::pet::model::{Animation, PetAnimation, SpriteRect};
 use crate::pet::{discover_codex_pets, PetProvider};
@@ -235,8 +236,9 @@ impl PetApp {
                     // Toggle WS_EX_TOPMOST via windows-sys
                     if let Some(win) = &self.window {
                         use windows_sys::Win32::UI::WindowsAndMessaging::{
-                            GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_LAYERED,
-                            WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                            GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
+                            HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
+                            SWP_NOSIZE, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
                         };
                         unsafe {
                             let ex = GetWindowLongPtrW(win.hwnd as _, GWL_EXSTYLE);
@@ -249,6 +251,18 @@ impl PetApp {
                                 base
                             };
                             SetWindowLongPtrW(win.hwnd as _, GWL_EXSTYLE, new_style as _);
+                            // Must call SetWindowPos to actually change the Z-order
+                            let hwnd_insert_after = if new_state {
+                                HWND_TOPMOST
+                            } else {
+                                HWND_NOTOPMOST
+                            };
+                            SetWindowPos(
+                                win.hwnd as _,
+                                hwnd_insert_after,
+                                0, 0, 0, 0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                            );
                         }
                     }
                     tracing::info!("Always on top: {}", new_state);
@@ -384,7 +398,8 @@ impl ApplicationHandler for PetApp {
 
         // Create the system tray
         let pet_names = Self::discover_pet_names();
-        match PetTray::new(&pet_names) {
+        let locale = Locale::detect(&config.language);
+        match PetTray::new(&pet_names, locale) {
             Ok(mut tray) => {
                 tray.set_always_on_top_text(config.always_on_top);
                 tracing::info!("System tray created with {} pet(s)", pet_names.len());
@@ -471,7 +486,7 @@ impl ApplicationHandler for PetApp {
                 button: MouseButton::Left,
                 ..
             } => {
-                // Initiate window drag
+                // Initiate window drag (native drag, Aero Snap disabled via subclass)
                 if let Some(win) = &self.window {
                     win.drag_window();
                     self.dragging = true;

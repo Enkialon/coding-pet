@@ -4,6 +4,8 @@
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
+use crate::locale::{ui_strings, Locale};
+
 /// Manages the system tray icon and its associated menus.
 #[allow(dead_code)]
 pub struct PetTray {
@@ -25,6 +27,8 @@ pub struct PetTray {
     context_menu: Menu,
     /// Whether always-on-top is currently active.
     pub always_on_top: bool,
+    /// Current locale (used when updating dynamic text).
+    locale: Locale,
 }
 
 impl PetTray {
@@ -34,17 +38,20 @@ impl PetTray {
     /// the "Select Pet" submenu.
     pub fn new(
         pet_names: &[(String, String)],
+        locale: Locale,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        let s = ui_strings(locale);
+
         // -- Build tray menu --
         let menu = Menu::new();
 
-        let menu_show_hide = MenuItem::with_id("show_hide", "显示/隐藏宠物", true, None);
+        let menu_show_hide = MenuItem::with_id("show_hide", s.show_hide_pet, true, None);
         menu.append(&menu_show_hide)?;
 
         menu.append(&PredefinedMenuItem::separator())?;
 
         // "Select Pet" submenu
-        let pet_submenu = Submenu::with_id("select_pet", "选择宠物", true);
+        let pet_submenu = Submenu::with_id("select_pet", s.select_pet, true);
         let mut pet_menu_items = Vec::new();
         for (display_name, pet_id) in pet_names {
             let item = MenuItem::with_id(
@@ -61,23 +68,23 @@ impl PetTray {
         menu.append(&PredefinedMenuItem::separator())?;
 
         let menu_open_folder_tray =
-            MenuItem::with_id("open_folder_tray", "打开宠物文件夹", true, None);
+            MenuItem::with_id("open_folder_tray", s.open_pet_folder, true, None);
         menu.append(&menu_open_folder_tray)?;
 
-        let menu_exit = MenuItem::with_id("exit", "退出", true, None);
+        let menu_exit = MenuItem::with_id("exit", s.exit, true, None);
         menu.append(&menu_exit)?;
 
         // -- Build context menu (right-click on pet window) --
         let context_menu = Menu::new();
 
-        let menu_idle = MenuItem::with_id("anim_idle", "待机", true, None);
-        let menu_wave = MenuItem::with_id("anim_wave", "挥手", true, None);
-        let menu_jump = MenuItem::with_id("anim_jump", "跳跃", true, None);
+        let menu_idle = MenuItem::with_id("anim_idle", s.anim_idle, true, None);
+        let menu_wave = MenuItem::with_id("anim_wave", s.anim_wave, true, None);
+        let menu_jump = MenuItem::with_id("anim_jump", s.anim_jump, true, None);
         let menu_always_on_top =
-            MenuItem::with_id("always_on_top", "置顶 ✓", true, None);
+            MenuItem::with_id("always_on_top", s.always_on_top_check, true, None);
         let menu_open_folder =
-            MenuItem::with_id("open_folder", "打开宠物文件夹", true, None);
-        let menu_exit_ctx = MenuItem::with_id("exit_ctx", "退出", true, None);
+            MenuItem::with_id("open_folder", s.open_pet_folder, true, None);
+        let menu_exit_ctx = MenuItem::with_id("exit_ctx", s.exit, true, None);
 
         context_menu.append(&menu_idle)?;
         context_menu.append(&menu_wave)?;
@@ -85,7 +92,7 @@ impl PetTray {
         context_menu.append(&PredefinedMenuItem::separator())?;
 
         // "Select Pet" submenu (mirrors the tray menu)
-        let pet_submenu_ctx = Submenu::with_id("select_pet_ctx", "选择宠物", true);
+        let pet_submenu_ctx = Submenu::with_id("select_pet_ctx", s.select_pet, true);
         for (display_name, pet_id) in pet_names {
             let item = MenuItem::with_id(
                 format!("pet_{}", pet_id),
@@ -108,7 +115,7 @@ impl PetTray {
         let _tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_icon(icon)
-            .with_tooltip("CodingPet - 桌面宠物")
+            .with_tooltip(s.tray_tooltip)
             .build()?;
 
         Ok(PetTray {
@@ -123,6 +130,7 @@ impl PetTray {
             menu_open_folder,
             context_menu,
             always_on_top: true,
+            locale,
         })
     }
 
@@ -147,10 +155,11 @@ impl PetTray {
     /// Update the "Always On Top" menu item text to reflect current state.
     pub fn set_always_on_top_text(&mut self, on: bool) {
         self.always_on_top = on;
+        let s = ui_strings(self.locale);
         let text = if on {
-            "置顶 ✓"
+            s.always_on_top_check
         } else {
-            "置顶"
+            s.always_on_top
         };
         self.menu_always_on_top.set_text(text);
     }

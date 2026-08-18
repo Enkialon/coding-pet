@@ -4,6 +4,7 @@ mod animation;
 mod app;
 mod config;
 mod error;
+mod locale;
 mod pet;
 mod renderer;
 mod tray;

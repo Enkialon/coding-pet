@@ -8,8 +8,10 @@ use winit::event_loop::ActiveEventLoop;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE,
+    GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE,
+    HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_THICKFRAME,
 };
 
 #[allow(dead_code)]
@@ -53,13 +55,27 @@ impl PetWindow {
         };
 
         // Apply extended window styles: layered + always-on-top + tool window
+        // Also remove WS_THICKFRAME to prevent Aero Snap (screen-edge maximise).
         unsafe {
+            // Remove resizable frame styles — prevents DWM Aero Snap
+            let style = GetWindowLongPtrW(hwnd as _, GWL_STYLE);
+            let new_style = style as usize
+                & !(WS_THICKFRAME as usize | WS_MINIMIZEBOX as usize | WS_MAXIMIZEBOX as usize);
+            SetWindowLongPtrW(hwnd as _, GWL_STYLE, new_style as _);
+
             let ex_style = GetWindowLongPtrW(hwnd as _, GWL_EXSTYLE);
-            let new_style = ex_style as usize
+            let new_ex = ex_style as usize
                 | WS_EX_LAYERED as usize
                 | WS_EX_TOPMOST as usize
                 | WS_EX_TOOLWINDOW as usize;
-            SetWindowLongPtrW(hwnd as _, GWL_EXSTYLE, new_style as _);
+            SetWindowLongPtrW(hwnd as _, GWL_EXSTYLE, new_ex as _);
+            // SetWindowLongPtrW alone doesn't change Z-order — must call SetWindowPos
+            SetWindowPos(
+                hwnd as _,
+                HWND_TOPMOST,
+                0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
         }
 
         Ok(PetWindow {

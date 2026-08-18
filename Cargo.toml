@@ -11,6 +11,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_LibraryLoader",
     "Win32_UI_HiDpi",
+    "Win32_Globalization",
+    "Win32_UI_Shell",
 ] }
 image = { version = "0.25", default-features = false, features = ["png", "webp"] }
 tray-icon = "0.24"
