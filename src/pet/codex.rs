@@ -99,14 +99,30 @@ fn validate_resource_path(pet_dir: &Path, resource_path: &Path) -> Result<PathBu
             ));
         }
     }
-    // Reject absolute paths that are not within pet_dir
-    if resource_path.is_absolute() {
+    // Reject absolute paths using either Windows or Unix syntax, regardless of
+    // which platform is currently validating the manifest.
+    if is_cross_platform_absolute(resource_path) {
         return Err(AppError::Pet(
             "Resource path is absolute and not allowed".into(),
         ));
     }
     let full = pet_dir.join(resource_path);
     Ok(full)
+}
+
+fn is_cross_platform_absolute(path: &Path) -> bool {
+    if path.is_absolute() {
+        return true;
+    }
+
+    let raw = path.to_string_lossy();
+    let bytes = raw.as_bytes();
+
+    matches!(bytes.first(), Some(b'/' | b'\\'))
+        || (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'/' | b'\\'))
 }
 
 // ---------------------------------------------------------------------------
@@ -490,9 +506,17 @@ mod tests {
     #[test]
     fn test_path_absolute_external_rejected() {
         let pet_dir = Path::new("pets").join("cat");
-        let resource = Path::new("C:\\Windows\\System32\\foo.png");
-        let result = validate_resource_path(&pet_dir, resource);
-        assert!(result.is_err());
+        for resource in [
+            "C:\\Windows\\System32\\foo.png",
+            "C:/Windows/System32/foo.png",
+            "/etc/passwd",
+            "\\\\server\\share\\foo.png",
+        ] {
+            assert!(
+                validate_resource_path(&pet_dir, Path::new(resource)).is_err(),
+                "absolute path should be rejected: {resource}"
+            );
+        }
     }
 
     // -- build_animation sanity --
