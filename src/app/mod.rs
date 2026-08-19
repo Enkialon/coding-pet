@@ -163,24 +163,14 @@ impl PetApp {
         }
     }
 
-    /// A menu selection is an explicit replay request. It takes precedence
-    /// over a stale pointer pose and always resets the animation to frame 0.
+    /// A menu selection is an explicit one-cycle preview. It does not change
+    /// the agent-owned `base_animation`, so Look/drag restore cannot turn a
+    /// preview into a sticky loop.
     fn play_menu_animation(&mut self, animation: PetAnimation) {
         self.looking = false;
         self.current_look_direction = None;
         self.pending_animation = None;
         self.pointer_look_suppressed_until = Some(Instant::now() + MENU_ACTION_LOOK_GRACE);
-        self.base_animation = if matches!(
-            animation,
-            PetAnimation::Running
-                | PetAnimation::RunningRight
-                | PetAnimation::RunningLeft
-                | PetAnimation::Waiting
-        ) {
-            animation
-        } else {
-            PetAnimation::Idle
-        };
         self.play_animation(animation);
         if animation != PetAnimation::Idle {
             self.animator.stop_after_current_cycle();
