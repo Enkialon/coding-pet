@@ -92,8 +92,8 @@ impl PetWindow {
     }
 
     /// Initiate a window drag (allows the user to move the pet by clicking and dragging).
-    pub fn drag_window(&self) {
-        let _ = self.window.drag_window();
+    pub fn drag_window(&self) -> bool {
+        self.window.drag_window().is_ok()
     }
 
     /// Set the outer position of the window in physical pixels.

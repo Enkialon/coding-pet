@@ -11,7 +11,7 @@ pub struct Config {
     pub scale: f64,
     #[serde(default = "default_true")]
     pub always_on_top: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub idle_animation: bool,
     /// Language setting: "auto" (system default), "zh", or "en".
     #[serde(default = "default_lang")]
@@ -27,6 +27,7 @@ pub struct Position {
 fn default_pet() -> String { String::new() }
 fn default_scale() -> f64 { 0.75 }
 fn default_true() -> bool { true }
+fn default_false() -> bool { false }
 fn default_lang() -> String { "auto".to_string() }
 
 impl Default for Config {
@@ -36,7 +37,7 @@ impl Default for Config {
             position: Position::default(),
             scale: default_scale(),
             always_on_top: true,
-            idle_animation: true,
+            idle_animation: false,
             language: default_lang(),
         }
     }
@@ -86,7 +87,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.scale, 0.75);
         assert!(config.always_on_top);
-        assert!(config.idle_animation);
+        assert!(!config.idle_animation);
     }
 
     #[test]
@@ -96,7 +97,7 @@ mod tests {
             position: Position { x: 100, y: 200 },
             scale: 1.0,
             always_on_top: false,
-            idle_animation: true,
+            idle_animation: false,
             language: "auto".to_string(),
         };
         let json = serde_json::to_string(&config).unwrap();

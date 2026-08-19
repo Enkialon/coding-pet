@@ -3,7 +3,7 @@
 // Drives a frame-accurate animation loop with zero-CPU sleep between frames.
 // Loads a real Codex pet if available, otherwise falls back to a test spritesheet.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::animation::{AmbientTimer, Animator};
 use crate::config::Config;
@@ -30,6 +30,17 @@ const TEST_FRAME_COUNT: u32 = 6;
 /// Frame duration for the test animation (milliseconds).
 const TEST_FRAME_MS: u64 = 150;
 
+/// Pointer tracking stays responsive without redrawing for every raw move.
+const LOOK_THROTTLE: Duration = Duration::from_millis(50);
+/// A larger enter radius and smaller exit radius form a Schmitt-trigger-style
+/// deadzone so the pet does not oscillate between Idle and Look.
+const LOOK_ENTER_RADIUS: f64 = 26.0;
+const LOOK_EXIT_RADIUS: f64 = 16.0;
+/// Keep the current direction slightly beyond the normal sector boundary.
+const LOOK_ANGLE_HYSTERESIS: f64 = 6.0_f64.to_radians();
+/// Layered windows can briefly report CursorLeft while their sprite changes.
+const CURSOR_LEAVE_DELAY: Duration = Duration::from_millis(80);
+
 pub struct PetApp {
     window: Option<PetWindow>,
     renderer: Option<Renderer>,
@@ -50,8 +61,26 @@ pub struct PetApp {
     /// Last known cursor position (physical pixels).
     cursor_x: i32,
     cursor_y: i32,
+    /// Whether the pointer is currently inside the pet window.
+    cursor_inside: bool,
     /// Whether a mouse drag is in progress.
     dragging: bool,
+    /// Whether a Codex v2 look pose currently overrides the agent state.
+    looking: bool,
+    /// Current stabilized v2 direction index.
+    current_look_direction: Option<u8>,
+    /// Last time a pending raw cursor position was applied to the sprite.
+    last_look_update: Option<Instant>,
+    /// Whether the latest raw cursor position still needs to be applied.
+    look_update_pending: bool,
+    /// Delayed confirmation for transient CursorLeft events.
+    cursor_leave_deadline: Option<Instant>,
+    /// Last window x-coordinate observed during a native drag.
+    last_drag_window_x: Option<i32>,
+    /// Persistent animation restored after pointer interaction ends.
+    base_animation: PetAnimation,
+    /// Latest hook animation deferred while a pointer interaction has priority.
+    pending_animation: Option<PetAnimation>,
 }
 
 impl PetApp {
@@ -80,7 +109,16 @@ impl PetApp {
             visible: true,
             cursor_x: 0,
             cursor_y: 0,
+            cursor_inside: false,
             dragging: false,
+            looking: false,
+            current_look_direction: None,
+            last_look_update: None,
+            look_update_pending: false,
+            cursor_leave_deadline: None,
+            last_drag_window_x: None,
+            base_animation: PetAnimation::Idle,
+            pending_animation: None,
         }
     }
 
@@ -111,8 +149,21 @@ impl PetApp {
             .collect();
         Animation {
             frames,
-            frame_duration_ms: TEST_FRAME_MS,
+            frame_durations_ms: vec![TEST_FRAME_MS; TEST_FRAME_COUNT as usize],
             looping: true,
+        }
+    }
+
+    /// Freeze the pet on the first frame of its Idle animation.
+    /// Used when the agent reports idle or a one-shot animation finishes,
+    /// so the pet stays completely still until the next event.
+    fn freeze_idle(&mut self) {
+        let idle_anim = self.idle_animation();
+        self.animator.set_animation(PetAnimation::Idle, &idle_anim);
+        self.animator.pause();
+        self.ambient_timer.reset();
+        if let Some(win) = &self.window {
+            win.window.request_redraw();
         }
     }
 
@@ -143,6 +194,115 @@ impl PetApp {
         self.ambient_timer.reset();
         if let Some(win) = &self.window {
             win.window.request_redraw();
+        }
+    }
+
+    /// Display one static Codex v2 pose without treating it as a completed
+    /// one-shot animation.
+    fn show_pose(&mut self, anim: PetAnimation) -> bool {
+        let Some(animation) = self
+            .provider
+            .as_ref()
+            .and_then(|provider| provider.animation(anim))
+            .cloned()
+        else {
+            return false;
+        };
+
+        self.animator.set_animation(anim, &animation);
+        self.animator.pause();
+        if let Some(win) = &self.window {
+            win.window.request_redraw();
+        }
+        true
+    }
+
+    fn restore_base_animation(&mut self) {
+        self.looking = false;
+        self.current_look_direction = None;
+        self.look_update_pending = false;
+        if let Some(animation) = self.pending_animation.take() {
+            self.play_animation(animation);
+            return;
+        }
+        if self.base_animation == PetAnimation::Idle {
+            self.freeze_idle();
+        } else {
+            self.play_animation(self.base_animation);
+        }
+    }
+
+    fn update_look_pose(&mut self) {
+        if self.dragging || !self.cursor_inside {
+            return;
+        }
+
+        match stabilized_look_direction_index(
+            self.cursor_x,
+            self.cursor_y,
+            WIN_WIDTH,
+            WIN_HEIGHT,
+            self.current_look_direction,
+        ) {
+            Some(index) => {
+                let animation = PetAnimation::Look(index);
+                if self.current_look_direction == Some(index) && self.looking {
+                    return;
+                }
+                if self.show_pose(animation) {
+                    self.looking = true;
+                    self.current_look_direction = Some(index);
+                } else {
+                    self.looking = false;
+                    self.current_look_direction = None;
+                }
+            }
+            None if self.looking => self.restore_base_animation(),
+            None => {}
+        }
+    }
+
+    fn queue_look_update(&mut self, now: Instant, immediate: bool) {
+        self.look_update_pending = true;
+        if immediate {
+            self.last_look_update = None;
+        }
+        self.flush_look_update(now);
+    }
+
+    fn flush_look_update(&mut self, now: Instant) {
+        if !self.look_update_pending || self.dragging || !self.cursor_inside {
+            return;
+        }
+        if self
+            .last_look_update
+            .is_some_and(|last| now < last + LOOK_THROTTLE)
+        {
+            return;
+        }
+
+        self.look_update_pending = false;
+        self.last_look_update = Some(now);
+        self.update_look_pose();
+    }
+
+    fn confirm_cursor_leave(&mut self, now: Instant) {
+        let Some(deadline) = self.cursor_leave_deadline else {
+            return;
+        };
+        if now < deadline {
+            return;
+        }
+
+        self.cursor_leave_deadline = None;
+        if !self.cursor_inside && self.looking && !self.dragging {
+            self.restore_base_animation();
+        }
+    }
+
+    fn play_drag_animation(&mut self, animation: PetAnimation) {
+        if self.animator.current_animation() != animation {
+            self.play_animation(animation);
         }
     }
 
@@ -291,6 +451,48 @@ impl PetApp {
     }
 }
 
+/// Convert a pointer position into a stabilized Codex v2 clockwise direction.
+/// Index 0 is up, 4 right, 8 down, and 12 left.
+fn stabilized_look_direction_index(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    current: Option<u8>,
+) -> Option<u8> {
+    let dx = f64::from(x) - f64::from(width) / 2.0;
+    let dy = f64::from(y) - f64::from(height) / 2.0;
+    let radius_squared = dx * dx + dy * dy;
+    let threshold = if current.is_some() {
+        LOOK_EXIT_RADIUS
+    } else {
+        LOOK_ENTER_RADIUS
+    };
+    if radius_squared <= threshold * threshold {
+        return None;
+    }
+
+    let mut angle = dx.atan2(-dy);
+    if angle < 0.0 {
+        angle += std::f64::consts::TAU;
+    }
+    Some(quantize_look_angle(angle, current))
+}
+
+fn quantize_look_angle(angle: f64, current: Option<u8>) -> u8 {
+    let step = std::f64::consts::TAU / 16.0;
+    if let Some(current) = current {
+        let center = f64::from(current) * step;
+        let distance = (angle - center + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        if distance.abs() <= step / 2.0 + LOOK_ANGLE_HYSTERESIS {
+            return current;
+        }
+    }
+    ((angle / step).round() as u8) % 16
+}
+
 /// Attempt to discover and load a Codex pet.
 /// If `preferred_id` is non-empty, try to load that specific pet first.
 fn try_load_pet(preferred_id: &str) -> Option<Box<dyn PetProvider>> {
@@ -427,6 +629,9 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
         if let StartCause::ResumeTimeReached { .. } = cause {
             let now = Instant::now();
 
+            self.confirm_cursor_leave(now);
+            self.flush_look_update(now);
+
             // Tick the animation
             if self.animator.tick(now) {
                 // Frame changed — request a redraw
@@ -435,18 +640,13 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                 }
             }
 
-            // Check if a one-shot animation just finished — return to Idle
+            // Check if a one-shot animation just finished — freeze in idle pose
             if !self.animator.is_playing() && self.animator.is_finished() {
-                let idle_anim = self.idle_animation();
-                self.animator.set_animation(PetAnimation::Idle, &idle_anim);
-                self.ambient_timer.reset();
-                if let Some(win) = &self.window {
-                    win.window.request_redraw();
-                }
+                self.freeze_idle();
             }
 
             // Check ambient timer: trigger random one-shot animation when idle
-            if self.visible {
+            if self.visible && !self.dragging && !self.looking {
                 if let Some(anim) = self.ambient_timer.check(now) {
                     // Only trigger if currently in Idle animation
                     if self.animator.current_animation() == PetAnimation::Idle {
@@ -480,6 +680,30 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_x = position.x as i32;
                 self.cursor_y = position.y as i32;
+                self.queue_look_update(Instant::now(), false);
+            }
+            WindowEvent::CursorEntered { .. } => {
+                self.cursor_inside = true;
+                self.cursor_leave_deadline = None;
+            }
+            WindowEvent::CursorLeft { .. } => {
+                self.cursor_inside = false;
+                self.look_update_pending = false;
+                if self.looking && !self.dragging {
+                    self.cursor_leave_deadline = Some(Instant::now() + CURSOR_LEAVE_DELAY);
+                }
+            }
+            WindowEvent::Moved(position) => {
+                if self.dragging {
+                    if let Some(previous_x) = self.last_drag_window_x.replace(position.x) {
+                        let delta_x = position.x - previous_x;
+                        if delta_x > 0 {
+                            self.play_drag_animation(PetAnimation::RunningRight);
+                        } else if delta_x < 0 {
+                            self.play_drag_animation(PetAnimation::RunningLeft);
+                        }
+                    }
+                }
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
@@ -487,9 +711,26 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                 ..
             } => {
                 // Initiate window drag (native drag, Aero Snap disabled via subclass)
-                if let Some(win) = &self.window {
-                    win.drag_window();
-                    self.dragging = true;
+                self.dragging = true;
+                self.looking = false;
+                self.current_look_direction = None;
+                self.look_update_pending = false;
+                self.cursor_leave_deadline = None;
+                self.last_drag_window_x = self.window.as_ref().map(|win| win.outer_position().0);
+                let initial_animation = if self.cursor_x >= WIN_WIDTH as i32 / 2 {
+                    PetAnimation::RunningRight
+                } else {
+                    PetAnimation::RunningLeft
+                };
+                self.play_drag_animation(initial_animation);
+                let drag_started = self
+                    .window
+                    .as_ref()
+                    .is_some_and(|win| win.drag_window());
+                if !drag_started {
+                    self.dragging = false;
+                    self.last_drag_window_x = None;
+                    self.restore_base_animation();
                 }
             }
             WindowEvent::MouseInput {
@@ -499,8 +740,15 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
             } => {
                 if self.dragging {
                     self.dragging = false;
+                    self.last_drag_window_x = None;
                     // Save position after drag
                     self.save_config();
+                    if self.cursor_inside {
+                        self.queue_look_update(Instant::now(), true);
+                    }
+                    if !self.looking {
+                        self.restore_base_animation();
+                    }
                 }
             }
             WindowEvent::MouseInput {
@@ -526,19 +774,44 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                     session_id = event.session_id.as_deref().unwrap_or(""),
                     "Received coding-tool event"
                 );
+                let interacting = self.dragging || self.looking;
                 let animation = match event.kind() {
-                    AgentEventKind::Idle => Some(PetAnimation::Idle),
-                    AgentEventKind::Working => Some(PetAnimation::Running),
-                    AgentEventKind::Reviewing => Some(PetAnimation::Review),
-                    AgentEventKind::Waiting => Some(PetAnimation::Waiting),
-                    AgentEventKind::Succeeded => Some(PetAnimation::Waving),
-                    AgentEventKind::Failed => Some(PetAnimation::Failed),
+                    // When the agent is idle, freeze the pet in its idle pose
+                    // instead of playing a looping idle animation.
+                    AgentEventKind::Idle => {
+                        self.base_animation = PetAnimation::Idle;
+                        None
+                    }
+                    AgentEventKind::Working => {
+                        self.base_animation = PetAnimation::Running;
+                        Some(PetAnimation::Running)
+                    }
+                    AgentEventKind::Waiting => {
+                        self.base_animation = PetAnimation::Waiting;
+                        Some(PetAnimation::Waiting)
+                    }
+                    AgentEventKind::Reviewing => {
+                        self.base_animation = PetAnimation::Idle;
+                        Some(PetAnimation::Review)
+                    }
+                    AgentEventKind::Succeeded => {
+                        self.base_animation = PetAnimation::Idle;
+                        Some(PetAnimation::Waving)
+                    }
+                    AgentEventKind::Failed => {
+                        self.base_animation = PetAnimation::Idle;
+                        Some(PetAnimation::Failed)
+                    }
                     AgentEventKind::Unknown => None,
                 };
-                if let Some(animation) = animation {
-                    self.play_animation(animation);
+                if interacting {
+                    self.pending_animation = animation;
                 } else {
-                    tracing::debug!("No animation mapping for event: {}", event.event);
+                    if let Some(animation) = animation {
+                        self.play_animation(animation);
+                    } else if event.kind() == AgentEventKind::Idle {
+                        self.freeze_idle();
+                    }
                 }
             }
         }
@@ -553,31 +826,45 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
             }
         }
 
-        // Calculate the earliest wake-up time from animation timer and ambient timer
+        // Calculate the earliest wake-up time from animation and interaction timers.
         let anim_time = if self.animator.is_playing() {
             Some(self.animator.next_frame_time())
         } else {
             None
         };
-        let ambient_time = if self.ambient_timer.is_enabled() && self.visible {
+        let ambient_time = if self.ambient_timer.is_enabled()
+            && self.visible
+            && !self.dragging
+            && !self.looking
+        {
             Some(self.ambient_timer.next_trigger_time())
         } else {
             None
         };
+        let look_time = if self.look_update_pending && self.cursor_inside && !self.dragging {
+            Some(
+                self.last_look_update
+                    .map(|last| last + LOOK_THROTTLE)
+                    .unwrap_or_else(Instant::now),
+            )
+        } else {
+            None
+        };
 
-        match (anim_time, ambient_time) {
-            (Some(a), Some(b)) => {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(a.min(b)));
-            }
-            (Some(a), None) => {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(a));
-            }
-            (None, Some(b)) => {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(b));
-            }
-            (None, None) => {
-                event_loop.set_control_flow(ControlFlow::Wait);
-            }
+        let next_wake = [
+            anim_time,
+            ambient_time,
+            look_time,
+            self.cursor_leave_deadline,
+        ]
+        .into_iter()
+        .flatten()
+        .min();
+
+        if let Some(deadline) = next_wake {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
         }
     }
 }
@@ -660,4 +947,60 @@ pub fn run() -> Result<(), crate::error::AppError> {
         .run_app(&mut app)
         .map_err(|e| crate::error::AppError::Window(e.to_string()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn look_direction_cardinals_follow_codex_clockwise_order() {
+        assert_eq!(stabilized_look_direction_index(96, 0, 192, 208, None), Some(0));
+        assert_eq!(
+            stabilized_look_direction_index(191, 104, 192, 208, None),
+            Some(4)
+        );
+        assert_eq!(
+            stabilized_look_direction_index(96, 207, 192, 208, None),
+            Some(8)
+        );
+        assert_eq!(
+            stabilized_look_direction_index(0, 104, 192, 208, None),
+            Some(12)
+        );
+    }
+
+    #[test]
+    fn look_direction_diagonal_and_deadzone() {
+        assert_eq!(
+            stabilized_look_direction_index(191, 0, 192, 208, None),
+            Some(2)
+        );
+        assert_eq!(stabilized_look_direction_index(96, 104, 192, 208, None), None);
+        assert_eq!(stabilized_look_direction_index(105, 110, 192, 208, None), None);
+    }
+
+    #[test]
+    fn look_deadzone_uses_enter_exit_hysteresis() {
+        // Twenty pixels right of center is too close to enter Look.
+        assert_eq!(stabilized_look_direction_index(116, 104, 192, 208, None), None);
+        // Once looking, the same point remains in the current direction.
+        assert_eq!(
+            stabilized_look_direction_index(116, 104, 192, 208, Some(4)),
+            Some(4)
+        );
+        // Moving inside the smaller exit radius returns to the base state.
+        assert_eq!(stabilized_look_direction_index(106, 104, 192, 208, Some(4)), None);
+    }
+
+    #[test]
+    fn look_angle_hysteresis_prevents_sector_chatter() {
+        let thirteen_degrees = 13.0_f64.to_radians();
+        let eighteen_degrees = 18.0_f64.to_radians();
+
+        // The normal boundary is 11.25°, but an active direction is retained
+        // until the cursor clears the additional 6° hysteresis margin.
+        assert_eq!(quantize_look_angle(thirteen_degrees, Some(0)), 0);
+        assert_eq!(quantize_look_angle(eighteen_degrees, Some(0)), 1);
+    }
 }

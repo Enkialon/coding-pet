@@ -1,5 +1,6 @@
 // Codex Pet Provider implementation — Phase 4
-// Loads Codex-format pet spritesheets (1536×1872, 8×9 grid) with optional pet.json manifest.
+// Loads Codex-format pet spritesheets. V2 (8×11) is the primary contract;
+// legacy V1 (8×9) remains readable so existing pets keep working.
 
 use std::path::{Path, PathBuf};
 
@@ -12,48 +13,64 @@ use super::PetProvider;
 // ---------------------------------------------------------------------------
 
 const CODEX_COLUMNS: u32 = 8;
-const CODEX_ROWS: u32 = 9;
+const CODEX_V1_ROWS: u32 = 9;
+const CODEX_V2_ROWS: u32 = 11;
 const CODEX_CELL_WIDTH: u32 = 192;
 const CODEX_CELL_HEIGHT: u32 = 208;
 const CODEX_SHEET_WIDTH: u32 = CODEX_COLUMNS * CODEX_CELL_WIDTH;   // 1536
-const CODEX_SHEET_HEIGHT: u32 = CODEX_ROWS * CODEX_CELL_HEIGHT;    // 1872
+const CODEX_V1_SHEET_HEIGHT: u32 = CODEX_V1_ROWS * CODEX_CELL_HEIGHT; // 1872
+const CODEX_V2_SHEET_HEIGHT: u32 = CODEX_V2_ROWS * CODEX_CELL_HEIGHT; // 2288
 
 // ---------------------------------------------------------------------------
 // Animation row mapping
 // ---------------------------------------------------------------------------
 
-fn codex_animation_def(anim: PetAnimation) -> (u32, u32) {
+fn codex_animation_def(anim: PetAnimation) -> Option<(u32, Vec<u64>, bool)> {
     match anim {
-        PetAnimation::Idle         => (0, 6),
-        PetAnimation::RunningRight => (1, 8),
-        PetAnimation::RunningLeft  => (2, 8),
-        PetAnimation::Waving       => (3, 4),
-        PetAnimation::Jumping      => (4, 5),
-        PetAnimation::Failed       => (5, 8),
-        PetAnimation::Waiting      => (6, 6),
-        PetAnimation::Running      => (7, 6),
-        PetAnimation::Review       => (8, 6),
+        PetAnimation::Idle => Some((0, vec![280, 110, 110, 140, 140, 320], true)),
+        PetAnimation::RunningRight => {
+            Some((1, vec![120, 120, 120, 120, 120, 120, 120, 220], true))
+        }
+        PetAnimation::RunningLeft => {
+            Some((2, vec![120, 120, 120, 120, 120, 120, 120, 220], true))
+        }
+        PetAnimation::Waving => Some((3, vec![140, 140, 140, 280], false)),
+        PetAnimation::Jumping => Some((4, vec![140, 140, 140, 140, 280], false)),
+        PetAnimation::Failed => {
+            Some((5, vec![140, 140, 140, 140, 140, 140, 140, 240], false))
+        }
+        PetAnimation::Waiting => Some((6, vec![150, 150, 150, 150, 150, 260], true)),
+        PetAnimation::Running => Some((7, vec![120, 120, 120, 120, 120, 220], true)),
+        PetAnimation::Review => Some((8, vec![150, 150, 150, 150, 150, 280], false)),
+        PetAnimation::Look(_) => None,
     }
 }
 
-fn build_animation(anim: PetAnimation) -> Animation {
-    let (row, frame_count) = codex_animation_def(anim);
-    let frames: Vec<SpriteRect> = (0..frame_count)
+fn build_animation(anim: PetAnimation, sprite_version: u32) -> Option<Animation> {
+    if let PetAnimation::Look(index) = anim {
+        if sprite_version < 2 || index >= 16 {
+            return None;
+        }
+        return Some(Animation {
+            frames: vec![compute_sprite_rect(
+                9 + u32::from(index / 8),
+                u32::from(index % 8),
+            )],
+            frame_durations_ms: vec![1_000],
+            looping: false,
+        });
+    }
+
+    let (row, frame_durations_ms, looping) = codex_animation_def(anim)?;
+    let frames = (0..frame_durations_ms.len() as u32)
         .map(|col| compute_sprite_rect(row, col))
         .collect();
 
-    Animation {
+    Some(Animation {
         frames,
-        frame_duration_ms: 150,
-        looping: matches!(
-            anim,
-            PetAnimation::Idle
-                | PetAnimation::Running
-                | PetAnimation::Waiting
-                | PetAnimation::RunningRight
-                | PetAnimation::RunningLeft
-        ),
-    }
+        frame_durations_ms,
+        looping,
+    })
 }
 
 /// Compute the sprite rectangle for a given row and column in the spritesheet atlas.
@@ -109,11 +126,35 @@ fn rgba_to_premultiplied_bgra(rgba: &[u8]) -> Vec<u8> {
 // Manifest (pet.json)
 // ---------------------------------------------------------------------------
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize)]
 #[serde(default)]
 struct PetManifest {
+    id: Option<String>,
     name: Option<String>,
+    #[serde(rename = "displayName")]
+    display_name: Option<String>,
     description: Option<String>,
+    #[serde(rename = "spriteVersionNumber", default = "default_sprite_version")]
+    sprite_version_number: u32,
+    #[serde(rename = "spritesheetPath")]
+    spritesheet_path: Option<String>,
+}
+
+fn default_sprite_version() -> u32 {
+    1
+}
+
+impl Default for PetManifest {
+    fn default() -> Self {
+        Self {
+            id: None,
+            name: None,
+            display_name: None,
+            description: None,
+            sprite_version_number: default_sprite_version(),
+            spritesheet_path: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -130,8 +171,8 @@ pub struct CodexPetProvider {
 impl CodexPetProvider {
     /// Load a Codex pet from the given directory.
     ///
-    /// Expects a spritesheet image (PNG or WebP) with dimensions 1536×1872.
-    /// Optionally reads `pet.json` for display name / description metadata.
+    /// Expects a Codex V2 spritesheet (1536×2288) or a legacy V1 sheet
+    /// (1536×1872). `spriteVersionNumber` selects the contract.
     pub fn load(pet_dir: &Path) -> Result<Self, AppError> {
         // --- 1. Read optional manifest ---
         let manifest_path = pet_dir.join("pet.json");
@@ -160,18 +201,31 @@ impl CodexPetProvider {
             .unwrap_or("Codex Pet")
             .to_string();
         let display_name = manifest
-            .name
+            .display_name
+            .clone()
+            .or_else(|| manifest.name.clone())
             .filter(|n| !n.is_empty())
-            .unwrap_or(dir_name);
+            .unwrap_or_else(|| dir_name.clone());
+        let pet_id = manifest
+            .id
+            .clone()
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| dir_name.to_lowercase().replace(' ', "_"));
+        let sprite_version = manifest.sprite_version_number;
+        if !matches!(sprite_version, 1 | 2) {
+            return Err(AppError::Pet(format!(
+                "Unsupported spriteVersionNumber {sprite_version}; expected 1 or 2"
+            )));
+        }
 
         let metadata = PetMetadata {
-            id: display_name.to_lowercase().replace(' ', "_"),
+            id: pet_id,
             display_name,
-            description: manifest.description,
+            description: manifest.description.clone(),
         };
 
         // --- 2. Find spritesheet file ---
-        let spritesheet_path = resolve_spritesheet(pet_dir)?;
+        let spritesheet_path = resolve_spritesheet(pet_dir, manifest.spritesheet_path.as_deref())?;
 
         // --- 3. Path security ---
         let canonical_dir = pet_dir
@@ -192,13 +246,18 @@ impl CodexPetProvider {
         let img = image::open(&canonical_sheet)?.into_rgba8();
 
         // --- 5. Validate dimensions ---
-        if img.width() != CODEX_SHEET_WIDTH || img.height() != CODEX_SHEET_HEIGHT {
+        let expected_height = if sprite_version == 2 {
+            CODEX_V2_SHEET_HEIGHT
+        } else {
+            CODEX_V1_SHEET_HEIGHT
+        };
+        if img.width() != CODEX_SHEET_WIDTH || img.height() != expected_height {
             return Err(AppError::Pet(format!(
                 "Spritesheet dimensions {}×{} do not match expected {}×{}",
                 img.width(),
                 img.height(),
                 CODEX_SHEET_WIDTH,
-                CODEX_SHEET_HEIGHT,
+                expected_height,
             )));
         }
 
@@ -207,7 +266,7 @@ impl CodexPetProvider {
         let stride = CODEX_SHEET_WIDTH as usize * 4;
 
         // --- 7. Pre-compute animations ---
-        let all_variants = [
+        let mut all_variants = vec![
             PetAnimation::Idle,
             PetAnimation::RunningRight,
             PetAnimation::RunningLeft,
@@ -218,9 +277,12 @@ impl CodexPetProvider {
             PetAnimation::Running,
             PetAnimation::Review,
         ];
+        if sprite_version >= 2 {
+            all_variants.extend((0..16).map(PetAnimation::Look));
+        }
         let animations: Vec<(PetAnimation, Animation)> = all_variants
             .iter()
-            .map(|&anim| (anim, build_animation(anim)))
+            .filter_map(|&anim| build_animation(anim, sprite_version).map(|data| (anim, data)))
             .collect();
 
         tracing::info!(
@@ -269,7 +331,20 @@ impl PetProvider for CodexPetProvider {
 /// 1. `spritesheet.webp`
 /// 2. `spritesheet.png`
 /// 3. Any `.webp` or `.png` file in the directory
-fn resolve_spritesheet(pet_dir: &Path) -> Result<PathBuf, AppError> {
+fn resolve_spritesheet(
+    pet_dir: &Path,
+    manifest_path: Option<&str>,
+) -> Result<PathBuf, AppError> {
+    if let Some(resource) = manifest_path.filter(|path| !path.is_empty()) {
+        let path = validate_resource_path(pet_dir, Path::new(resource))?;
+        if path.is_file() {
+            return Ok(path);
+        }
+        return Err(AppError::Pet(format!(
+            "Manifest spritesheetPath does not exist: {}",
+            path.display()
+        )));
+    }
     let webp = pet_dir.join("spritesheet.webp");
     if webp.exists() {
         return Ok(webp);
@@ -308,6 +383,14 @@ fn resolve_spritesheet(pet_dir: &Path) -> Result<PathBuf, AppError> {
 mod tests {
     use super::*;
 
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("coding-pet-{name}-{}-{nonce}", std::process::id()))
+    }
+
     // -- Atlas geometry tests --
 
     #[test]
@@ -330,10 +413,10 @@ mod tests {
 
     #[test]
     fn test_sprite_rect_last_cell() {
-        // Row 8, Col 7 (last cell in 9×8 grid)
-        let rect = compute_sprite_rect(8, 7);
+        // Row 10, Col 7 (last cell in the V2 11×8 grid)
+        let rect = compute_sprite_rect(10, 7);
         assert_eq!(rect.x, 1344);
-        assert_eq!(rect.y, 1664);
+        assert_eq!(rect.y, 2080);
         assert_eq!(rect.width, 192);
         assert_eq!(rect.height, 208);
     }
@@ -342,10 +425,19 @@ mod tests {
 
     #[test]
     fn test_parse_valid_manifest() {
-        let json = r#"{"name": "Test Cat", "description": "A test pet"}"#;
+        let json = r#"{
+            "id": "test-cat",
+            "displayName": "Test Cat",
+            "description": "A test pet",
+            "spriteVersionNumber": 2,
+            "spritesheetPath": "spritesheet.webp"
+        }"#;
         let manifest: PetManifest = serde_json::from_str(json).unwrap();
-        assert_eq!(manifest.name, Some("Test Cat".to_string()));
+        assert_eq!(manifest.id, Some("test-cat".to_string()));
+        assert_eq!(manifest.display_name, Some("Test Cat".to_string()));
         assert_eq!(manifest.description, Some("A test pet".to_string()));
+        assert_eq!(manifest.sprite_version_number, 2);
+        assert_eq!(manifest.spritesheet_path, Some("spritesheet.webp".to_string()));
     }
 
     #[test]
@@ -354,6 +446,7 @@ mod tests {
         let manifest: PetManifest = serde_json::from_str(json).unwrap();
         assert_eq!(manifest.name, None);
         assert_eq!(manifest.description, None);
+        assert_eq!(manifest.sprite_version_number, 1);
     }
 
     #[test]
@@ -401,10 +494,10 @@ mod tests {
 
     #[test]
     fn test_build_idle_animation() {
-        let anim = build_animation(PetAnimation::Idle);
+        let anim = build_animation(PetAnimation::Idle, 2).unwrap();
         assert_eq!(anim.frames.len(), 6);
         assert!(anim.looping);
-        assert_eq!(anim.frame_duration_ms, 150);
+        assert_eq!(anim.frame_durations_ms, vec![280, 110, 110, 140, 140, 320]);
         // First frame should be row 0, col 0
         assert_eq!(anim.frames[0].x, 0);
         assert_eq!(anim.frames[0].y, 0);
@@ -412,10 +505,61 @@ mod tests {
 
     #[test]
     fn test_build_waving_animation() {
-        let anim = build_animation(PetAnimation::Waving);
+        let anim = build_animation(PetAnimation::Waving, 2).unwrap();
         assert_eq!(anim.frames.len(), 4);
         assert!(!anim.looping);
         // Row 3
         assert_eq!(anim.frames[0].y, 3 * 208);
+    }
+
+    #[test]
+    fn test_build_v2_look_directions() {
+        let up = build_animation(PetAnimation::Look(0), 2).unwrap();
+        assert_eq!(up.frames[0].x, 0);
+        assert_eq!(up.frames[0].y, 9 * 208);
+
+        let down = build_animation(PetAnimation::Look(8), 2).unwrap();
+        assert_eq!(down.frames[0].x, 0);
+        assert_eq!(down.frames[0].y, 10 * 208);
+
+        let up_left = build_animation(PetAnimation::Look(15), 2).unwrap();
+        assert_eq!(up_left.frames[0].x, 7 * 192);
+        assert_eq!(up_left.frames[0].y, 10 * 208);
+    }
+
+    #[test]
+    fn test_v1_has_no_look_directions() {
+        assert!(build_animation(PetAnimation::Look(0), 1).is_none());
+    }
+
+    #[test]
+    fn test_loads_complete_v2_pet_package() {
+        let pet_dir = unique_test_dir("v2-load");
+        std::fs::create_dir_all(&pet_dir).unwrap();
+        let sheet_path = pet_dir.join("spritesheet.png");
+        image::RgbaImage::new(CODEX_SHEET_WIDTH, CODEX_V2_SHEET_HEIGHT)
+            .save(&sheet_path)
+            .unwrap();
+        let manifest_path = pet_dir.join("pet.json");
+        std::fs::write(
+            &manifest_path,
+            r#"{
+                "id": "test-v2",
+                "displayName": "Test V2",
+                "spriteVersionNumber": 2,
+                "spritesheetPath": "spritesheet.png"
+            }"#,
+        )
+        .unwrap();
+
+        let provider = CodexPetProvider::load(&pet_dir).unwrap();
+        assert_eq!(provider.metadata().id, "test-v2");
+        assert_eq!(provider.metadata().display_name, "Test V2");
+        assert!(provider.animation(PetAnimation::Look(0)).is_some());
+        assert!(provider.animation(PetAnimation::Look(15)).is_some());
+
+        std::fs::remove_file(manifest_path).unwrap();
+        std::fs::remove_file(sheet_path).unwrap();
+        std::fs::remove_dir(pet_dir).unwrap();
     }
 }

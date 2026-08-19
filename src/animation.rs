@@ -10,10 +10,11 @@ pub struct Animator {
     frame_index: usize,
     frame_count: usize,
     frames: Vec<SpriteRect>,
-    frame_duration: Duration,
+    frame_durations: Vec<Duration>,
     looping: bool,
     last_advance: Instant,
     playing: bool,
+    finished: bool,
 }
 
 impl Animator {
@@ -24,10 +25,11 @@ impl Animator {
             frame_index: 0,
             frame_count: 0,
             frames: Vec::new(),
-            frame_duration: Duration::from_millis(150),
+            frame_durations: vec![Duration::from_millis(150)],
             looping: true,
             last_advance: Instant::now(),
             playing: false,
+            finished: false,
         }
     }
 
@@ -37,9 +39,12 @@ impl Animator {
         self.frame_index = 0;
         self.frame_count = animation_data.frames.len();
         self.frames = animation_data.frames.clone();
-        self.frame_duration = Duration::from_millis(animation_data.frame_duration_ms);
+        self.frame_durations = (0..animation_data.frames.len())
+            .map(|index| Duration::from_millis(animation_data.frame_duration_ms(index)))
+            .collect();
         self.looping = animation_data.looping;
         self.playing = true;
+        self.finished = false;
         self.last_advance = Instant::now();
     }
 
@@ -50,7 +55,7 @@ impl Animator {
             return false;
         }
 
-        if now.duration_since(self.last_advance) < self.frame_duration {
+        if now.duration_since(self.last_advance) < self.current_frame_duration() {
             return false;
         }
 
@@ -66,6 +71,7 @@ impl Animator {
         } else {
             // Non-looping animation: stay on last frame, stop playing
             self.playing = false;
+            self.finished = true;
             false
         }
     }
@@ -77,7 +83,7 @@ impl Animator {
 
     /// When the next frame should be displayed.
     pub fn next_frame_time(&self) -> Instant {
-        self.last_advance + self.frame_duration
+        self.last_advance + self.current_frame_duration()
     }
 
     /// Whether the animator is actively playing.
@@ -92,7 +98,20 @@ impl Animator {
 
     /// Returns true if a non-looping animation has reached its last frame.
     pub fn is_finished(&self) -> bool {
-        !self.looping && self.frame_index >= self.frame_count.saturating_sub(1)
+        self.finished
+    }
+
+    /// Freeze on the current frame (stop advancing).
+    pub fn pause(&mut self) {
+        self.playing = false;
+    }
+
+    fn current_frame_duration(&self) -> Duration {
+        self.frame_durations
+            .get(self.frame_index)
+            .copied()
+            .or_else(|| self.frame_durations.last().copied())
+            .unwrap_or_else(|| Duration::from_millis(150))
     }
 }
 
@@ -172,7 +191,7 @@ impl AmbientTimer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pet::model::{Animation, SpriteRect, PetAnimation};
+    use crate::pet::model::{Animation, PetAnimation, SpriteRect};
 
     fn test_animation(frames: usize, duration_ms: u64, looping: bool) -> Animation {
         Animation {
@@ -184,7 +203,7 @@ mod tests {
                     height: 208,
                 })
                 .collect(),
-            frame_duration_ms: duration_ms,
+            frame_durations_ms: vec![duration_ms; frames],
             looping,
         }
     }
@@ -235,5 +254,31 @@ mod tests {
         assert!(animator.is_finished());
         // Should stay at last frame (index 2)
         assert_eq!(animator.current_rect().x, 384);
+    }
+
+    #[test]
+    fn test_uses_per_frame_durations() {
+        let mut anim = test_animation(2, 100, true);
+        anim.frame_durations_ms = vec![100, 300];
+        let mut animator = Animator::new();
+        animator.set_animation(PetAnimation::Idle, &anim);
+
+        let start = Instant::now();
+        assert!(animator.tick(start + Duration::from_millis(101)));
+        assert_eq!(animator.current_rect().x, 192);
+        assert!(!animator.tick(start + Duration::from_millis(250)));
+        assert!(animator.tick(start + Duration::from_millis(402)));
+        assert_eq!(animator.current_rect().x, 0);
+    }
+
+    #[test]
+    fn test_paused_pose_is_not_finished() {
+        let anim = test_animation(1, 100, false);
+        let mut animator = Animator::new();
+        animator.set_animation(PetAnimation::Look(8), &anim);
+        animator.pause();
+
+        assert!(!animator.is_playing());
+        assert!(!animator.is_finished());
     }
 }

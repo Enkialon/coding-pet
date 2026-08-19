@@ -1,17 +1,21 @@
 # CodingPet
 
+English | [简体中文](README.zh-CN.md)
+
 A lightweight Windows-native desktop pet powered by pure Rust.
 
-CodingPet is an extremely lightweight programmer's desktop pet. It is compatible with the Codex custom pet resource format, displaying animated sprites directly on your desktop with near-zero resource usage.
+CodingPet is an extremely lightweight programmer's desktop pet. It uses the Codex v2 custom-pet asset contract and a provider-neutral local event protocol, displaying coding activity directly on your desktop with near-zero idle resource usage.
 
 ## Features (V0.1)
 
 - Transparent borderless animated pet on desktop
 - Always On Top
-- Mouse drag to reposition
+- Mouse drag to reposition with directional pet animation
+- Codex v2 pointer look directions (16 clockwise poses)
 - Multi-monitor support (including negative coordinates)
 - Per-monitor DPI aware
-- Loads Codex pet spritesheets (1536×1872, 8×9 grid, PNG/WebP)
+- Loads Codex v2 pet spritesheets (1536×2288, 8×11 grid, PNG/WebP)
+- Reads legacy Codex v1 8×9 pets during migration
 - Auto-discovers pets from `%USERPROFILE%\.codex\pets\`
 - System tray with show/hide/exit
 - Right-click context menu (play animations, select pet)
@@ -32,16 +36,17 @@ Output: `target/release/coding-pet.exe` (single executable, no runtime dependenc
 
 ## Run
 
-Double-click `coding-pet.exe` or run from terminal:
+Double-click `coding-pet.exe` or run it from PowerShell:
 
-```bash
-./target/release/coding-pet.exe
+```powershell
+.\target\release\coding-pet.exe
 ```
 
 For debug logging:
-```bash
-set RUST_LOG=debug
-coding-pet.exe
+
+```powershell
+$env:RUST_LOG = "debug"
+.\target\release\coding-pet.exe
 ```
 
 ## Coding-tool integrations
@@ -81,10 +86,11 @@ CodingPet automatically discovers pets from the Codex pets directory:
 
 ### Spritesheet Format
 
-- Dimensions: 1536 × 1872 pixels
+- Primary contract: Codex v2 (`spriteVersionNumber: 2`)
+- Dimensions: 1536 × 2288 pixels
 - Format: PNG or WebP with transparency
-- Grid: 8 columns × 9 rows (192×208 per cell)
-- Maximum file size: 20 MiB
+- Grid: 8 columns × 11 rows (192×208 per cell)
+- Legacy v1 sheets without `spriteVersionNumber` remain readable at 1536 × 1872
 
 ### Animation Layout
 
@@ -99,17 +105,37 @@ CodingPet automatically discovers pets from the Codex pets directory:
 | 6 | Waiting | 6 |
 | 7 | Running | 6 |
 | 8 | Review | 6 |
+| 9 | Look directions 000°–157.5° | 8 |
+| 10 | Look directions 180°–337.5° | 8 |
 
-### pet.json (optional)
+Rows 9–10 contain one continuous clockwise set of 16 look poses. `000°` is up,
+`090°` is screen-right, `180°` is down, and `270°` is screen-left.
+
+### pet.json
 
 ```json
 {
-  "name": "My Pet",
-  "description": "A custom desktop pet"
+  "id": "my-pet",
+  "displayName": "My Pet",
+  "description": "A custom desktop pet",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp"
 }
 ```
 
-Unknown fields are ignored for forward compatibility.
+Unknown fields are ignored for forward compatibility. Omitting
+`spriteVersionNumber` selects the legacy v1 contract.
+
+## Interaction priority
+
+Animation states are resolved in this order:
+
+```text
+drag animation > pointer look > coding-tool status > ambient animation
+```
+
+Hook events received during pointer interaction are retained. When interaction ends, CodingPet
+continues with the latest task state or deferred one-shot notification.
 
 ## Configuration
 
@@ -121,9 +147,19 @@ Config file location: `%APPDATA%\CodingPet\config\config.json`
   "position": { "x": 1200, "y": 700 },
   "scale": 0.75,
   "always_on_top": true,
-  "idle_animation": true
+  "idle_animation": false,
+  "language": "auto"
 }
 ```
+
+| Field | Meaning |
+|---|---|
+| `pet` | Active pet ID |
+| `position` | Window position in physical desktop pixels |
+| `scale` | Pet scale factor |
+| `always_on_top` | Keep the pet above other windows |
+| `idle_animation` | Enable random ambient animations |
+| `language` | `auto`, `zh`, or `en` |
 
 Missing or corrupt configuration is automatically reset to defaults.
 
@@ -144,6 +180,8 @@ Missing or corrupt configuration is automatically reset to defaults.
 - `windows-sys` for zero-overhead Win32 FFI
 - Event-driven animation (only redraws on frame change)
 - No GPU, no web tech, no external runtime
+- Codex v2 asset contract in the pet resource layer
+- Independent provider-neutral protocol in the coding-tool integration layer
 
 ## Roadmap
 

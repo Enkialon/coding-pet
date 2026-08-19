@@ -9,6 +9,9 @@ pub enum PetAnimation {
     Waiting,
     Running,
     Review,
+    /// One of the 16 clockwise Codex v2 look poses. Index 0 is up, 4 is
+    /// screen-right, 8 is down, and 12 is screen-left.
+    Look(u8),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -22,8 +25,20 @@ pub struct SpriteRect {
 #[derive(Debug, Clone)]
 pub struct Animation {
     pub frames: Vec<SpriteRect>,
-    pub frame_duration_ms: u64,
+    /// Duration for each frame. Codex uses state-specific timing and often a
+    /// longer hold on the final frame.
+    pub frame_durations_ms: Vec<u64>,
     pub looping: bool,
+}
+
+impl Animation {
+    pub fn frame_duration_ms(&self, index: usize) -> u64 {
+        self.frame_durations_ms
+            .get(index)
+            .copied()
+            .or_else(|| self.frame_durations_ms.last().copied())
+            .unwrap_or(150)
+    }
 }
 
 #[derive(Debug, Clone)]
