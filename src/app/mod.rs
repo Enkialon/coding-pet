@@ -87,6 +87,9 @@ impl PetApp {
             base_animation: PetAnimation::Idle,
             pending_animation: None,
             loop_idle: config.loop_idle,
+            look_range: config.look_range.clamp(80, 600) as i32,
+            display_scale: config.display_scale.clamp(0.5, 2.0),
+            settings: None,
         }
     }
 
@@ -290,9 +293,9 @@ impl PetApp {
             return;
         };
         let margin = if self.looking {
-            LOOK_EXIT_MARGIN
+            self.look_range + (LOOK_EXIT_MARGIN - LOOK_ENTER_MARGIN)
         } else {
-            LOOK_ENTER_MARGIN
+            self.look_range
         };
 
         match classify_pointer_zone(cursor, origin, (size.width, size.height), margin) {
@@ -479,7 +482,100 @@ impl PetApp {
         config.always_on_top = self.tray.as_ref().is_some_and(|t| t.always_on_top);
         config.idle_animation = self.ambient_timer.is_enabled();
         config.loop_idle = self.loop_idle;
+        config.look_range = self.look_range.max(0) as u32;
+        config.display_scale = self.display_scale;
         config.save();
+    }
+
+    fn apply_display_scale(&mut self, scale: f64) {
+        self.display_scale = scale.clamp(0.5, 2.0);
+        let width = ((f64::from(WIN_WIDTH) * self.display_scale).round() as u32).max(1);
+        let height = ((f64::from(WIN_HEIGHT) * self.display_scale).round() as u32).max(1);
+        if let Some(win) = &self.window {
+            let _ = win
+                .window
+                .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+            win.window.request_redraw();
+        }
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.set_output_size(width, height);
+        }
+    }
+
+    fn open_settings(&mut self, event_loop: &ActiveEventLoop, from_pet: bool) {
+        if let Some(settings) = &self.settings {
+            settings.focus();
+            return;
+        }
+        let locale = crate::locale::Locale::detect(&Config::load().language);
+        let values = crate::ui::settings::SettingsValues {
+            display_scale: self.display_scale as f32,
+            look_range: self.look_range.max(0) as u32,
+            loop_idle: self.loop_idle,
+            idle_animation: self.ambient_timer.is_enabled(),
+            always_on_top: self.tray.as_ref().is_some_and(|t| t.always_on_top),
+        };
+        let anchor = if from_pet {
+            let (x, y) = self
+                .window
+                .as_ref()
+                .map(|win| {
+                    let origin = win.outer_position();
+                    let size = win.window.outer_size();
+                    (
+                        origin.0 + size.width as i32 / 2,
+                        origin.1 + size.height as i32 / 2,
+                    )
+                })
+                .unwrap_or((0, 0));
+            crate::ui::settings::SettingsAnchor::Pet { x, y }
+        } else {
+            let scale = self
+                .window
+                .as_ref()
+                .map(|win| win.scale_factor())
+                .unwrap_or(1.0);
+            let (x, y) = platform::global_cursor_position(scale)
+                .unwrap_or_else(|| crate::platform::PetWindow::primary_monitor_center(event_loop));
+            crate::ui::settings::SettingsAnchor::Point(x, y)
+        };
+        match crate::ui::settings::SettingsWindow::new(event_loop, locale, values, anchor) {
+            Ok(window) => self.settings = Some(window),
+            Err(error) => tracing::error!("Could not open settings: {error}"),
+        }
+    }
+
+    fn apply_settings_patch(&mut self, patch: crate::ui::settings::SettingsPatch) {
+        if let Some(scale) = patch.display_scale {
+            self.apply_display_scale(scale);
+        }
+        if let Some(range) = patch.look_range {
+            self.look_range = range.clamp(80, 600) as i32;
+        }
+        if let Some(loop_idle) = patch.loop_idle {
+            self.loop_idle = loop_idle;
+            if self.base_animation == PetAnimation::Idle && !self.dragging && !self.looking {
+                self.restore_idle();
+            }
+        }
+        if let Some(idle_animation) = patch.idle_animation {
+            self.ambient_timer.set_enabled(idle_animation);
+        }
+        if let Some(enabled) = patch.always_on_top {
+            if let Some(tray) = &mut self.tray {
+                tray.set_always_on_top_text(enabled);
+            }
+            if let Some(win) = &self.window {
+                win.set_always_on_top(enabled);
+            }
+        }
+        if patch.save {
+            self.save_config();
+        }
+        if patch.close {
+            // Destroy wgpu/egui; the pet keeps the values already applied.
+            self.settings = None;
+        }
     }
 
     /// Handle a menu event from the tray or context menu.
@@ -522,6 +618,8 @@ impl PetApp {
                     tracing::info!("Always on top: {}", new_state);
                 }
             }
+            "settings" => self.open_settings(event_loop, false),
+            "settings_ctx" => self.open_settings(event_loop, true),
             "open_folder" | "open_folder_tray" => {
                 if let Some(path) = Self::pets_folder_path() {
                     if let Err(error) = platform::open_folder(&path) {

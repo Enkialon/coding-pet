@@ -99,18 +99,40 @@ impl Renderer {
             std::ptr::write_bytes(self.pixels, 0u8, dib_size);
 
             // 2. Copy sprite region row-by-row into the DIB
-            let copy_w = (rect.width as usize).min(w);
-            let copy_h = (rect.height as usize).min(h);
-            for row in 0..copy_h {
-                let src_offset = ((rect.y as usize) + row) * stride + (rect.x as usize) * 4;
-                let dst_offset = row * dib_stride;
-                let bytes = copy_w * 4;
-                if src_offset + bytes <= spritesheet.len() {
-                    std::ptr::copy_nonoverlapping(
-                        spritesheet.as_ptr().add(src_offset),
-                        self.pixels.add(dst_offset),
-                        bytes,
-                    );
+            let src_w = rect.width as usize;
+            let src_h = rect.height as usize;
+            if src_w == w && src_h == h {
+                let copy_w = src_w.min(w);
+                let copy_h = src_h.min(h);
+                for row in 0..copy_h {
+                    let src_offset = ((rect.y as usize) + row) * stride + (rect.x as usize) * 4;
+                    let dst_offset = row * dib_stride;
+                    let bytes = copy_w * 4;
+                    if src_offset + bytes <= spritesheet.len() {
+                        std::ptr::copy_nonoverlapping(
+                            spritesheet.as_ptr().add(src_offset),
+                            self.pixels.add(dst_offset),
+                            bytes,
+                        );
+                    }
+                }
+            } else {
+                for dy in 0..h {
+                    let sy = dy * src_h / h.max(1);
+                    let src_row = ((rect.y as usize) + sy) * stride + (rect.x as usize) * 4;
+                    let dst_row = dy * dib_stride;
+                    for dx in 0..w {
+                        let sx = dx * src_w / w.max(1);
+                        let src = src_row + sx * 4;
+                        let dst = dst_row + dx * 4;
+                        if src + 4 <= spritesheet.len() {
+                            std::ptr::copy_nonoverlapping(
+                                spritesheet.as_ptr().add(src),
+                                self.pixels.add(dst),
+                                4,
+                            );
+                        }
+                    }
                 }
             }
 
@@ -159,7 +181,51 @@ impl Renderer {
         }
     }
 
-    /// The layered GDI surface has a fixed physical size.
+    /// Recreate the DIB when settings change the on-screen pet size.
+    pub fn set_output_size(&mut self, width: u32, height: u32) {
+        let width = width.max(1);
+        let height = height.max(1);
+        if width == self.width && height == self.height {
+            return;
+        }
+        unsafe {
+            SelectObject(self.mem_dc, self.old_bitmap);
+            DeleteObject(self.dib_bitmap);
+            let bih = BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width as i32,
+                biHeight: -(height as i32),
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB,
+                biSizeImage: 0,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            };
+            let mut pixel_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+            let dib_bitmap = CreateDIBSection(
+                self.mem_dc,
+                &bih as *const BITMAPINFOHEADER as *const BITMAPINFO,
+                DIB_RGB_COLORS,
+                &mut pixel_ptr,
+                std::ptr::null_mut(),
+                0,
+            );
+            if dib_bitmap.is_null() || pixel_ptr.is_null() {
+                tracing::error!("CreateDIBSection failed while resizing pet");
+                return;
+            }
+            self.old_bitmap = SelectObject(self.mem_dc, dib_bitmap);
+            self.dib_bitmap = dib_bitmap;
+            self.pixels = pixel_ptr as *mut u8;
+            self.width = width;
+            self.height = height;
+        }
+    }
+
+    /// The layered GDI surface size is owned by `set_output_size`.
     pub fn resize_surface(&mut self, _width: u32, _height: u32) {}
 }
 

@@ -18,6 +18,13 @@ pub struct Config {
     /// Settings UI can toggle this later; missing configs default to looping.
     #[serde(default = "default_true")]
     pub loop_idle: bool,
+    /// Pointer awareness ring in physical pixels. Default matches the original 240px ring.
+    #[serde(default = "default_look_range")]
+    pub look_range: u32,
+    /// Display scale from the settings window. Defaults to 1.0 so existing
+    /// unused `scale` values (0.75) do not shrink the pet.
+    #[serde(default = "default_display_scale")]
+    pub display_scale: f64,
     /// Language setting: "auto" (system default), "zh", or "en".
     #[serde(default = "default_lang")]
     pub language: String,
@@ -34,6 +41,12 @@ fn default_pet() -> String {
 }
 fn default_scale() -> f64 {
     0.75
+}
+fn default_look_range() -> u32 {
+    240
+}
+fn default_display_scale() -> f64 {
+    1.0
 }
 fn default_true() -> bool {
     true
@@ -54,6 +67,8 @@ impl Default for Config {
             always_on_top: true,
             idle_animation: false,
             loop_idle: true,
+            look_range: default_look_range(),
+            display_scale: default_display_scale(),
             language: default_lang(),
         }
     }
@@ -107,6 +122,8 @@ mod tests {
         assert!(config.always_on_top);
         assert!(!config.idle_animation);
         assert!(config.loop_idle);
+        assert_eq!(config.look_range, 240);
+        assert_eq!(config.display_scale, 1.0);
     }
 
     #[test]
@@ -118,6 +135,8 @@ mod tests {
             always_on_top: false,
             idle_animation: false,
             loop_idle: true,
+            look_range: 240,
+            display_scale: 1.0,
             language: "auto".to_string(),
         };
         let json = serde_json::to_string(&config).unwrap();
@@ -140,5 +159,7 @@ mod tests {
         assert_eq!(config.scale, 0.75);
         assert!(config.always_on_top);
         assert!(config.loop_idle);
+        assert_eq!(config.look_range, 240);
+        assert_eq!(config.display_scale, 1.0);
     }
 }

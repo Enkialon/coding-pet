@@ -4,6 +4,7 @@ use crate::animation::{AmbientTimer, Animator};
 use crate::pet::model::PetAnimation;
 use crate::pet::PetProvider;
 use crate::platform::{PetWindow, Renderer};
+use crate::ui::settings::SettingsWindow;
 use crate::ui::tray::PetTray;
 
 pub(super) struct PetApp {
@@ -31,4 +32,7 @@ pub(super) struct PetApp {
     /// Whether idle should loop. Owned here so a future settings page can
     /// toggle it without waiting for the next config reload.
     pub(super) loop_idle: bool,
+    pub(super) look_range: i32,
+    pub(super) display_scale: f64,
+    pub(super) settings: Option<SettingsWindow>,
 }

@@ -50,6 +50,10 @@ impl Renderer {
         }
     }
 
+    pub fn set_output_size(&mut self, width: u32, height: u32) {
+        self.resize_surface(width, height);
+    }
+
     pub fn draw_frame(&mut self, spritesheet: &[u8], stride: usize, rect: SpriteRect) {
         let width = self.width as usize;
         let height = self.height as usize;

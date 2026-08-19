@@ -80,6 +80,7 @@ pub struct UiStrings {
     pub always_on_top: &'static str,
     pub always_on_top_check: &'static str,
     pub tray_tooltip: &'static str,
+    pub settings: &'static str,
 }
 
 /// Return the set of UI strings for the given locale.
@@ -103,6 +104,7 @@ pub fn ui_strings(locale: Locale) -> UiStrings {
             always_on_top: "置顶",
             always_on_top_check: "置顶 ✓",
             tray_tooltip: "CodingPet - 桌面宠物",
+            settings: "设置",
         },
         Locale::En => UiStrings {
             show_hide_pet: "Show/Hide Pet",
@@ -122,6 +124,7 @@ pub fn ui_strings(locale: Locale) -> UiStrings {
             always_on_top: "Always on Top",
             always_on_top_check: "Always on Top ✓",
             tray_tooltip: "CodingPet - Desktop Pet",
+            settings: "Settings",
         },
     }
 }

@@ -64,6 +64,9 @@ impl PetTray {
 
         menu.append(&PredefinedMenuItem::separator())?;
 
+        let menu_settings_tray = MenuItem::with_id("settings", s.settings, true, None);
+        menu.append(&menu_settings_tray)?;
+        action_menu_items.push(menu_settings_tray);
         let menu_open_folder_tray =
             MenuItem::with_id("open_folder_tray", s.open_pet_folder, true, None);
         menu.append(&menu_open_folder_tray)?;
@@ -93,6 +96,9 @@ impl PetTray {
         context_menu.append(&pet_submenu_ctx)?;
 
         context_menu.append(&PredefinedMenuItem::separator())?;
+        let menu_settings_ctx = MenuItem::with_id("settings_ctx", s.settings, true, None);
+        context_menu.append(&menu_settings_ctx)?;
+        action_menu_items.push(menu_settings_ctx);
         context_menu.append(&menu_always_on_top)?;
         context_menu.append(&menu_open_folder)?;
         context_menu.append(&PredefinedMenuItem::separator())?;

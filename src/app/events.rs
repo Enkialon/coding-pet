@@ -99,6 +99,9 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
         tracing::info!("Window and renderer initialised — animation started ({source})");
         self.window = Some(win);
         self.renderer = Some(renderer);
+        if (self.display_scale - 1.0).abs() > f64::EPSILON {
+            self.apply_display_scale(self.display_scale);
+        }
     }
 
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
@@ -135,9 +138,21 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
     fn window_event(
         &mut self,
         _event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
+        window_id: WindowId,
         event: WindowEvent,
     ) {
+        if self
+            .settings
+            .as_ref()
+            .is_some_and(|window| window.window_id() == window_id)
+        {
+            if let Some(settings) = self.settings.as_mut() {
+                let patch = settings.on_window_event(&event);
+                self.apply_settings_patch(patch);
+            }
+            return;
+        }
+
         match event {
             WindowEvent::CloseRequested => {
                 // The tray menu is the single place that explicitly exits or
