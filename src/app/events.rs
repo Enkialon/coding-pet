@@ -12,7 +12,8 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::WindowId;
 
 use super::{
-    normalize_cursor_position, PetApp, CURSOR_LEAVE_DELAY, LOOK_THROTTLE, WIN_HEIGHT, WIN_WIDTH,
+    normalize_cursor_position, PetApp, DRAG_DIRECTION_REVERSAL_THRESHOLD, DRAG_DIRECTION_THRESHOLD,
+    WIN_HEIGHT, WIN_WIDTH,
 };
 
 impl ApplicationHandler<AppUserEvent> for PetApp {
@@ -104,8 +105,7 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
         if let StartCause::ResumeTimeReached { .. } = cause {
             let now = Instant::now();
 
-            self.confirm_cursor_leave(now);
-            self.flush_look_update(now);
+            self.update_pointer_awareness(now);
 
             // Tick the animation
             if self.animator.tick(now) {
@@ -172,27 +172,37 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                     .unwrap_or(winit::dpi::PhysicalSize::new(WIN_WIDTH, WIN_HEIGHT));
                 (self.cursor_x, self.cursor_y) =
                     normalize_cursor_position(position.x, position.y, size.width, size.height);
-                self.queue_look_update(Instant::now(), false);
-            }
-            WindowEvent::CursorEntered { .. } => {
-                self.cursor_inside = true;
-                self.cursor_leave_deadline = None;
-            }
-            WindowEvent::CursorLeft { .. } => {
-                self.cursor_inside = false;
-                self.look_update_pending = false;
-                if self.looking && !self.dragging {
-                    self.cursor_leave_deadline = Some(Instant::now() + CURSOR_LEAVE_DELAY);
-                }
             }
             WindowEvent::Moved(position) => {
                 if self.dragging {
-                    if let Some(previous_x) = self.last_drag_window_x.replace(position.x) {
-                        let delta_x = position.x - previous_x;
-                        if delta_x > 0 {
-                            self.play_drag_animation(PetAnimation::RunningRight);
-                        } else if delta_x < 0 {
-                            self.play_drag_animation(PetAnimation::RunningLeft);
+                    if let Some(direction_anchor_x) = self.last_drag_window_x {
+                        let delta_x = position.x - direction_anchor_x;
+                        match self.animator.current_animation() {
+                            PetAnimation::RunningRight => {
+                                if position.x > direction_anchor_x {
+                                    self.last_drag_window_x = Some(position.x);
+                                } else if delta_x <= -DRAG_DIRECTION_REVERSAL_THRESHOLD {
+                                    self.last_drag_window_x = Some(position.x);
+                                    self.play_drag_animation(PetAnimation::RunningLeft);
+                                }
+                            }
+                            PetAnimation::RunningLeft => {
+                                if position.x < direction_anchor_x {
+                                    self.last_drag_window_x = Some(position.x);
+                                } else if delta_x >= DRAG_DIRECTION_REVERSAL_THRESHOLD {
+                                    self.last_drag_window_x = Some(position.x);
+                                    self.play_drag_animation(PetAnimation::RunningRight);
+                                }
+                            }
+                            _ if delta_x >= DRAG_DIRECTION_THRESHOLD => {
+                                self.last_drag_window_x = Some(position.x);
+                                self.play_drag_animation(PetAnimation::RunningRight);
+                            }
+                            _ if delta_x <= -DRAG_DIRECTION_THRESHOLD => {
+                                self.last_drag_window_x = Some(position.x);
+                                self.play_drag_animation(PetAnimation::RunningLeft);
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -206,15 +216,10 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                 self.dragging = true;
                 self.looking = false;
                 self.current_look_direction = None;
-                self.look_update_pending = false;
-                self.cursor_leave_deadline = None;
                 self.last_drag_window_x = self.window.as_ref().map(|win| win.outer_position().0);
-                let initial_animation = if self.cursor_x >= WIN_WIDTH as i32 / 2 {
-                    PetAnimation::RunningRight
-                } else {
-                    PetAnimation::RunningLeft
-                };
-                self.play_drag_animation(initial_animation);
+                // Start neutral; horizontal movement chooses a direction once
+                // the initial threshold has been crossed.
+                self.play_drag_animation(PetAnimation::Running);
                 let drag_started = self.window.as_ref().is_some_and(|win| win.drag_window());
                 if !drag_started {
                     self.dragging = false;
@@ -232,9 +237,6 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                     self.last_drag_window_x = None;
                     // Save position after drag
                     self.save_config();
-                    if self.cursor_inside {
-                        self.queue_look_update(Instant::now(), true);
-                    }
                     if !self.looking {
                         self.restore_base_animation();
                     }
@@ -332,25 +334,16 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
             } else {
                 None
             };
-        let look_time = if self.look_update_pending && self.cursor_inside && !self.dragging {
-            Some(
-                self.last_look_update
-                    .map(|last| last + LOOK_THROTTLE)
-                    .unwrap_or_else(Instant::now),
-            )
+        let pointer_time = if self.visible && !self.dragging {
+            Some(self.next_pointer_poll)
         } else {
             None
         };
 
-        let next_wake = [
-            anim_time,
-            ambient_time,
-            look_time,
-            self.cursor_leave_deadline,
-        ]
-        .into_iter()
-        .flatten()
-        .min();
+        let next_wake = [anim_time, ambient_time, pointer_time]
+            .into_iter()
+            .flatten()
+            .min();
 
         if let Some(deadline) = next_wake {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));

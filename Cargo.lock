@@ -334,6 +334,7 @@ dependencies = [
 name = "coding-pet"
 version = "0.0.1"
 dependencies = [
+ "core-graphics",
  "directories",
  "getrandom 0.3.4",
  "image",

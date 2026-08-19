@@ -106,6 +106,13 @@ impl Animator {
         self.playing = false;
     }
 
+    /// Finish at the end of the current cycle even when the source animation
+    /// is normally looping. Used by menu previews without changing Hook
+    /// playback semantics.
+    pub fn stop_after_current_cycle(&mut self) {
+        self.looping = false;
+    }
+
     fn current_frame_duration(&self) -> Duration {
         self.frame_durations
             .get(self.frame_index)
@@ -293,5 +300,19 @@ mod tests {
         animator.set_animation(PetAnimation::Running, &animation);
         assert_eq!(animator.current_rect().x, 0);
         assert!(animator.is_playing());
+    }
+
+    #[test]
+    fn looping_animation_can_be_previewed_for_one_cycle() {
+        let animation = test_animation(2, 10, true);
+        let mut animator = Animator::new();
+        animator.set_animation(PetAnimation::RunningRight, &animation);
+        animator.stop_after_current_cycle();
+        let start = Instant::now();
+
+        assert!(animator.tick(start + Duration::from_millis(20)));
+        assert!(!animator.tick(start + Duration::from_millis(40)));
+        assert!(animator.is_finished());
+        assert!(!animator.is_playing());
     }
 }

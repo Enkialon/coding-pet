@@ -27,3 +27,15 @@ pub fn open_folder(path: &Path) -> std::io::Result<()> {
         .spawn()
         .map(|_| ())
 }
+
+pub fn global_cursor_position(scale_factor: f64) -> Option<(i32, i32)> {
+    use core_graphics::event::CGEvent;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).ok()?;
+    let point = CGEvent::new(source).ok()?.location();
+    Some((
+        (point.x * scale_factor).round() as i32,
+        (point.y * scale_factor).round() as i32,
+    ))
+}

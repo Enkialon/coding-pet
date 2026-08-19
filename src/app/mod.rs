@@ -17,7 +17,9 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 mod interaction;
 mod state;
 
-use interaction::{normalize_cursor_position, stabilized_look_direction_index};
+use interaction::{
+    classify_pointer_zone, normalize_cursor_position, stabilized_look_direction_index, PointerZone,
+};
 use state::PetApp;
 
 /// Default window size for the desktop pet.
@@ -30,16 +32,24 @@ const TEST_FRAME_COUNT: u32 = 6;
 /// Frame duration for the test animation (milliseconds).
 const TEST_FRAME_MS: u64 = 150;
 
-/// Pointer tracking stays responsive without redrawing for every raw move.
-const LOOK_THROTTLE: Duration = Duration::from_millis(50);
+/// Polling is only used for the small awareness ring around the pet. It avoids
+/// global mouse hooks while remaining light enough for an idle desktop app.
+const POINTER_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const LOOK_ENTER_MARGIN: i32 = 240;
+const LOOK_EXIT_MARGIN: i32 = 300;
+/// Explicit menu actions must remain visible long enough to complete instead
+/// of being immediately replaced by a nearby-pointer Look pose.
+const MENU_ACTION_LOOK_GRACE: Duration = Duration::from_millis(1_600);
+/// Ignore small horizontal reversals while dragging so hand jitter does not
+/// rapidly flip between the left- and right-running animations.
+const DRAG_DIRECTION_THRESHOLD: i32 = 8;
+const DRAG_DIRECTION_REVERSAL_THRESHOLD: i32 = 24;
 /// A larger enter radius and smaller exit radius form a Schmitt-trigger-style
 /// deadzone so the pet does not oscillate between Idle and Look.
-const LOOK_ENTER_RADIUS: f64 = 26.0;
-const LOOK_EXIT_RADIUS: f64 = 16.0;
+const LOOK_ENTER_RADIUS: f64 = 40.0;
+const LOOK_EXIT_RADIUS: f64 = 24.0;
 /// Keep the current direction slightly beyond the normal sector boundary.
-const LOOK_ANGLE_HYSTERESIS: f64 = 6.0_f64.to_radians();
-/// Layered windows can briefly report CursorLeft while their sprite changes.
-const CURSOR_LEAVE_DELAY: Duration = Duration::from_millis(80);
+const LOOK_ANGLE_HYSTERESIS: f64 = 10.0_f64.to_radians();
 
 impl PetApp {
     pub fn new(config: &Config) -> Self {
@@ -67,13 +77,11 @@ impl PetApp {
             visible: true,
             cursor_x: 0,
             cursor_y: 0,
-            cursor_inside: false,
             dragging: false,
             looking: false,
             current_look_direction: None,
-            last_look_update: None,
-            look_update_pending: false,
-            cursor_leave_deadline: None,
+            next_pointer_poll: Instant::now(),
+            pointer_look_suppressed_until: None,
             last_drag_window_x: None,
             base_animation: PetAnimation::Idle,
             pending_animation: None,
@@ -160,9 +168,8 @@ impl PetApp {
     fn play_menu_animation(&mut self, animation: PetAnimation) {
         self.looking = false;
         self.current_look_direction = None;
-        self.look_update_pending = false;
-        self.cursor_leave_deadline = None;
         self.pending_animation = None;
+        self.pointer_look_suppressed_until = Some(Instant::now() + MENU_ACTION_LOOK_GRACE);
         self.base_animation = if matches!(
             animation,
             PetAnimation::Running
@@ -175,6 +182,9 @@ impl PetApp {
             PetAnimation::Idle
         };
         self.play_animation(animation);
+        if animation != PetAnimation::Idle {
+            self.animator.stop_after_current_cycle();
+        }
     }
 
     /// Display one static Codex v2 pose without treating it as a completed
@@ -200,7 +210,6 @@ impl PetApp {
     fn restore_base_animation(&mut self) {
         self.looking = false;
         self.current_look_direction = None;
-        self.look_update_pending = false;
         if let Some(animation) = self.pending_animation.take() {
             self.play_animation(animation);
             return;
@@ -213,7 +222,7 @@ impl PetApp {
     }
 
     fn update_look_pose(&mut self) {
-        if self.dragging || !self.cursor_inside {
+        if self.dragging {
             return;
         }
 
@@ -242,41 +251,50 @@ impl PetApp {
         }
     }
 
-    fn queue_look_update(&mut self, now: Instant, immediate: bool) {
-        self.look_update_pending = true;
-        if immediate {
-            self.last_look_update = None;
+    fn update_pointer_awareness(&mut self, now: Instant) {
+        if now < self.next_pointer_poll {
+            return;
         }
-        self.flush_look_update(now);
-    }
-
-    fn flush_look_update(&mut self, now: Instant) {
-        if !self.look_update_pending || self.dragging || !self.cursor_inside {
+        self.next_pointer_poll = now + POINTER_POLL_INTERVAL;
+        if self.dragging || !self.visible {
             return;
         }
         if self
-            .last_look_update
-            .is_some_and(|last| now < last + LOOK_THROTTLE)
+            .pointer_look_suppressed_until
+            .is_some_and(|deadline| now < deadline)
         {
             return;
         }
+        self.pointer_look_suppressed_until = None;
 
-        self.look_update_pending = false;
-        self.last_look_update = Some(now);
-        self.update_look_pose();
-    }
-
-    fn confirm_cursor_leave(&mut self, now: Instant) {
-        let Some(deadline) = self.cursor_leave_deadline else {
+        let Some((origin, size, scale_factor)) = self.window.as_ref().map(|window| {
+            (
+                window.outer_position(),
+                window.window.inner_size(),
+                window.scale_factor(),
+            )
+        }) else {
             return;
         };
-        if now < deadline {
+        let Some(cursor) = platform::global_cursor_position(scale_factor) else {
             return;
-        }
+        };
+        let margin = if self.looking {
+            LOOK_EXIT_MARGIN
+        } else {
+            LOOK_ENTER_MARGIN
+        };
 
-        self.cursor_leave_deadline = None;
-        if !self.cursor_inside && self.looking && !self.dragging {
-            self.restore_base_animation();
+        match classify_pointer_zone(cursor, origin, (size.width, size.height), margin) {
+            PointerZone::Nearby(x, y) => {
+                (self.cursor_x, self.cursor_y) =
+                    normalize_cursor_position(f64::from(x), f64::from(y), size.width, size.height);
+                self.update_look_pose();
+            }
+            PointerZone::Neutral | PointerZone::Far if self.looking => {
+                self.restore_base_animation();
+            }
+            PointerZone::Neutral | PointerZone::Far => {}
         }
     }
 

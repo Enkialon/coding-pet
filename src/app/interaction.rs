@@ -1,5 +1,40 @@
 use super::{LOOK_ANGLE_HYSTERESIS, LOOK_ENTER_RADIUS, LOOK_EXIT_RADIUS, WIN_HEIGHT, WIN_WIDTH};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PointerZone {
+    /// The pointer is over the pet itself, so the pet should face forward.
+    Neutral,
+    /// The pointer is in the surrounding awareness ring. Coordinates are
+    /// relative to the pet window and may be outside its bounds.
+    Nearby(i32, i32),
+    /// The pointer is outside the awareness ring.
+    Far,
+}
+
+pub(super) fn classify_pointer_zone(
+    cursor: (i32, i32),
+    window_origin: (i32, i32),
+    window_size: (u32, u32),
+    awareness_margin: i32,
+) -> PointerZone {
+    let local_x = cursor.0 - window_origin.0;
+    let local_y = cursor.1 - window_origin.1;
+    let width = window_size.0 as i32;
+    let height = window_size.1 as i32;
+
+    if local_x >= 0 && local_x < width && local_y >= 0 && local_y < height {
+        PointerZone::Neutral
+    } else if local_x >= -awareness_margin
+        && local_x < width + awareness_margin
+        && local_y >= -awareness_margin
+        && local_y < height + awareness_margin
+    {
+        PointerZone::Nearby(local_x, local_y)
+    } else {
+        PointerZone::Far
+    }
+}
+
 /// Convert a pointer position into a stabilized Codex v2 clockwise direction.
 /// Index 0 is up, 4 right, 8 down, and 12 left.
 pub(super) fn stabilized_look_direction_index(
@@ -96,15 +131,15 @@ mod tests {
     #[test]
     fn look_deadzone_uses_enter_exit_hysteresis() {
         assert_eq!(
-            stabilized_look_direction_index(116, 104, 192, 208, None),
+            stabilized_look_direction_index(126, 104, 192, 208, None),
             None
         );
         assert_eq!(
-            stabilized_look_direction_index(116, 104, 192, 208, Some(4)),
+            stabilized_look_direction_index(126, 104, 192, 208, Some(4)),
             Some(4)
         );
         assert_eq!(
-            stabilized_look_direction_index(106, 104, 192, 208, Some(4)),
+            stabilized_look_direction_index(116, 104, 192, 208, Some(4)),
             None
         );
     }
@@ -112,12 +147,30 @@ mod tests {
     #[test]
     fn look_angle_hysteresis_prevents_sector_chatter() {
         assert_eq!(quantize_look_angle(13.0_f64.to_radians(), Some(0)), 0);
-        assert_eq!(quantize_look_angle(18.0_f64.to_radians(), Some(0)), 1);
+        assert_eq!(quantize_look_angle(22.0_f64.to_radians(), Some(0)), 1);
     }
 
     #[test]
     fn cursor_position_is_normalized_on_retina_surfaces() {
         assert_eq!(normalize_cursor_position(192.0, 208.0, 384, 416), (96, 104));
         assert_eq!(normalize_cursor_position(96.0, 104.0, 192, 208), (96, 104));
+    }
+
+    #[test]
+    fn pointer_zone_uses_pet_as_neutral_buffer() {
+        let origin = (500, 300);
+        let size = (192, 208);
+        assert_eq!(
+            classify_pointer_zone((550, 350), origin, size, 240),
+            PointerZone::Neutral
+        );
+        assert_eq!(
+            classify_pointer_zone((450, 350), origin, size, 240),
+            PointerZone::Nearby(-50, 50)
+        );
+        assert_eq!(
+            classify_pointer_zone((200, 350), origin, size, 240),
+            PointerZone::Far
+        );
     }
 }
