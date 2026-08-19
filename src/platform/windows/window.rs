@@ -98,7 +98,8 @@ impl PetWindow {
         })
     }
 
-    /// Initiate a window drag (allows the user to move the pet by clicking and dragging).
+    /// Native drag is unused: it blocks the event loop so run animations freeze.
+    #[allow(dead_code)]
     pub fn drag_window(&self) -> bool {
         self.window.drag_window().is_ok()
     }
@@ -136,7 +137,6 @@ impl PetWindow {
     }
 
     /// Set the outer position of the window in physical pixels.
-    #[allow(dead_code)]
     pub fn set_outer_position(&self, x: i32, y: i32) {
         self.window
             .set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
@@ -151,7 +151,6 @@ impl PetWindow {
     }
 
     /// Return the current scale factor of the window's monitor.
-    #[allow(dead_code)]
     pub fn scale_factor(&self) -> f64 {
         self.window.scale_factor()
     }

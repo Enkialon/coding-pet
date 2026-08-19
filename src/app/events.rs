@@ -11,10 +11,7 @@ use winit::event::{ElementState, MouseButton, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::WindowId;
 
-use super::{
-    normalize_cursor_position, PetApp, DRAG_DIRECTION_REVERSAL_THRESHOLD, DRAG_DIRECTION_THRESHOLD,
-    WIN_HEIGHT, WIN_WIDTH,
-};
+use super::{normalize_cursor_position, PetApp, WIN_HEIGHT, WIN_WIDTH};
 
 impl ApplicationHandler<AppUserEvent> for PetApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -66,6 +63,9 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
         // Build and start the Idle animation
         let idle_anim = self.idle_animation();
         self.animator.set_animation(PetAnimation::Idle, &idle_anim);
+        if !self.loop_idle {
+            self.animator.pause();
+        }
 
         // Draw the first frame immediately
         let rect = self.animator.current_rect();
@@ -115,9 +115,9 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                 }
             }
 
-            // Check if a one-shot animation just finished — freeze in idle pose
+            // Check if a one-shot animation just finished — return to idle
             if !self.animator.is_playing() && self.animator.is_finished() {
-                self.freeze_idle();
+                self.restore_idle();
             }
 
             // Check ambient timer: trigger random one-shot animation when idle
@@ -172,39 +172,8 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                     .unwrap_or(winit::dpi::PhysicalSize::new(WIN_WIDTH, WIN_HEIGHT));
                 (self.cursor_x, self.cursor_y) =
                     normalize_cursor_position(position.x, position.y, size.width, size.height);
-            }
-            WindowEvent::Moved(position) => {
                 if self.dragging {
-                    if let Some(direction_anchor_x) = self.last_drag_window_x {
-                        let delta_x = position.x - direction_anchor_x;
-                        match self.animator.current_animation() {
-                            PetAnimation::RunningRight => {
-                                if position.x > direction_anchor_x {
-                                    self.last_drag_window_x = Some(position.x);
-                                } else if delta_x <= -DRAG_DIRECTION_REVERSAL_THRESHOLD {
-                                    self.last_drag_window_x = Some(position.x);
-                                    self.play_drag_animation(PetAnimation::RunningLeft);
-                                }
-                            }
-                            PetAnimation::RunningLeft => {
-                                if position.x < direction_anchor_x {
-                                    self.last_drag_window_x = Some(position.x);
-                                } else if delta_x >= DRAG_DIRECTION_REVERSAL_THRESHOLD {
-                                    self.last_drag_window_x = Some(position.x);
-                                    self.play_drag_animation(PetAnimation::RunningRight);
-                                }
-                            }
-                            _ if delta_x >= DRAG_DIRECTION_THRESHOLD => {
-                                self.last_drag_window_x = Some(position.x);
-                                self.play_drag_animation(PetAnimation::RunningRight);
-                            }
-                            _ if delta_x <= -DRAG_DIRECTION_THRESHOLD => {
-                                self.last_drag_window_x = Some(position.x);
-                                self.play_drag_animation(PetAnimation::RunningLeft);
-                            }
-                            _ => {}
-                        }
-                    }
+                    self.follow_drag_cursor();
                 }
             }
             WindowEvent::MouseInput {
@@ -212,35 +181,14 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                 button: MouseButton::Left,
                 ..
             } => {
-                // Initiate window drag (native drag, Aero Snap disabled via subclass)
-                self.dragging = true;
-                self.looking = false;
-                self.current_look_direction = None;
-                self.last_drag_window_x = self.window.as_ref().map(|win| win.outer_position().0);
-                // Start neutral; horizontal movement chooses a direction once
-                // the initial threshold has been crossed.
-                self.play_drag_animation(PetAnimation::Running);
-                let drag_started = self.window.as_ref().is_some_and(|win| win.drag_window());
-                if !drag_started {
-                    self.dragging = false;
-                    self.last_drag_window_x = None;
-                    self.restore_base_animation();
-                }
+                self.begin_software_drag();
             }
             WindowEvent::MouseInput {
                 state: ElementState::Released,
                 button: MouseButton::Left,
                 ..
             } => {
-                if self.dragging {
-                    self.dragging = false;
-                    self.last_drag_window_x = None;
-                    // Save position after drag
-                    self.save_config();
-                    if !self.looking {
-                        self.restore_base_animation();
-                    }
-                }
+                self.end_software_drag();
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
@@ -272,8 +220,7 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                 );
                 let interacting = self.dragging || self.looking;
                 let animation = match event.kind() {
-                    // When the agent is idle, freeze the pet in its idle pose
-                    // instead of playing a looping idle animation.
+                    // Idle returns to the configured idle mode (loop or freeze).
                     AgentEventKind::Idle => {
                         self.base_animation = PetAnimation::Idle;
                         None
@@ -306,7 +253,7 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                     if let Some(animation) = animation {
                         self.play_animation(animation);
                     } else if event.kind() == AgentEventKind::Idle {
-                        self.freeze_idle();
+                        self.restore_idle();
                     }
                 }
             }
@@ -334,7 +281,7 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
             } else {
                 None
             };
-        let pointer_time = if self.visible && !self.dragging {
+        let pointer_time = if self.visible {
             Some(self.next_pointer_poll)
         } else {
             None

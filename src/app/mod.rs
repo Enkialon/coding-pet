@@ -83,8 +83,10 @@ impl PetApp {
             next_pointer_poll: Instant::now(),
             pointer_look_suppressed_until: None,
             last_drag_window_x: None,
+            drag_cursor_offset: None,
             base_animation: PetAnimation::Idle,
             pending_animation: None,
+            loop_idle: config.loop_idle,
         }
     }
 
@@ -120,9 +122,23 @@ impl PetApp {
         }
     }
 
+    /// Return to idle according to `loop_idle`: either freeze on frame 0 or
+    /// keep playing the looping idle clip.
+    fn restore_idle(&mut self) {
+        if self.loop_idle {
+            if self.animator.current_animation() != PetAnimation::Idle
+                || !self.animator.is_playing()
+            {
+                self.play_animation(PetAnimation::Idle);
+            }
+        } else {
+            self.freeze_idle();
+        }
+    }
+
     /// Freeze the pet on the first frame of its Idle animation.
-    /// Used when the agent reports idle or a one-shot animation finishes,
-    /// so the pet stays completely still until the next event.
+    /// Used when looping idle is disabled, so the pet stays still until the
+    /// next event.
     fn freeze_idle(&mut self) {
         let idle_anim = self.idle_animation();
         self.animator.set_animation(PetAnimation::Idle, &idle_anim);
@@ -205,7 +221,7 @@ impl PetApp {
             return;
         }
         if self.base_animation == PetAnimation::Idle {
-            self.freeze_idle();
+            self.restore_idle();
         } else {
             self.play_animation(self.base_animation);
         }
@@ -246,7 +262,11 @@ impl PetApp {
             return;
         }
         self.next_pointer_poll = now + POINTER_POLL_INTERVAL;
-        if self.dragging || !self.visible {
+        if !self.visible {
+            return;
+        }
+        if self.dragging {
+            self.follow_drag_cursor();
             return;
         }
         if self
@@ -294,6 +314,114 @@ impl PetApp {
         }
     }
 
+    fn begin_software_drag(&mut self) {
+        let Some((origin, scale_factor)) = self
+            .window
+            .as_ref()
+            .map(|win| (win.outer_position(), win.scale_factor()))
+        else {
+            return;
+        };
+        let cursor = platform::global_cursor_position(scale_factor)
+            .unwrap_or((origin.0 + self.cursor_x, origin.1 + self.cursor_y));
+
+        self.dragging = true;
+        self.looking = false;
+        self.current_look_direction = None;
+        self.last_drag_window_x = Some(origin.0);
+        self.drag_cursor_offset = Some((cursor.0 - origin.0, cursor.1 - origin.1));
+
+        let initial_animation = if self.cursor_x >= WIN_WIDTH as i32 / 2 {
+            PetAnimation::RunningRight
+        } else {
+            PetAnimation::RunningLeft
+        };
+        self.play_drag_animation(initial_animation);
+    }
+
+    fn follow_drag_cursor(&mut self) {
+        if !self.dragging {
+            return;
+        }
+        let Some(scale_factor) = self.window.as_ref().map(|win| win.scale_factor()) else {
+            return;
+        };
+        let Some(cursor) = platform::global_cursor_position(scale_factor) else {
+            return;
+        };
+        self.apply_drag_cursor(cursor);
+    }
+
+    fn apply_drag_cursor(&mut self, cursor: (i32, i32)) {
+        let Some(offset) = self.drag_cursor_offset else {
+            return;
+        };
+        let new_x = cursor.0 - offset.0;
+        let new_y = cursor.1 - offset.1;
+        let moved = if let Some(win) = self.window.as_ref() {
+            let (current_x, current_y) = win.outer_position();
+            if new_x == current_x && new_y == current_y {
+                false
+            } else {
+                win.set_outer_position(new_x, new_y);
+                true
+            }
+        } else {
+            return;
+        };
+        if moved {
+            self.update_drag_direction(new_x);
+        }
+    }
+
+    fn update_drag_direction(&mut self, window_x: i32) {
+        let Some(anchor_x) = self.last_drag_window_x else {
+            self.last_drag_window_x = Some(window_x);
+            return;
+        };
+        let delta_x = window_x - anchor_x;
+        match self.animator.current_animation() {
+            PetAnimation::RunningRight => {
+                if window_x > anchor_x {
+                    self.last_drag_window_x = Some(window_x);
+                } else if delta_x <= -DRAG_DIRECTION_REVERSAL_THRESHOLD {
+                    self.last_drag_window_x = Some(window_x);
+                    self.play_drag_animation(PetAnimation::RunningLeft);
+                }
+            }
+            PetAnimation::RunningLeft => {
+                if window_x < anchor_x {
+                    self.last_drag_window_x = Some(window_x);
+                } else if delta_x >= DRAG_DIRECTION_REVERSAL_THRESHOLD {
+                    self.last_drag_window_x = Some(window_x);
+                    self.play_drag_animation(PetAnimation::RunningRight);
+                }
+            }
+            _ if delta_x >= DRAG_DIRECTION_THRESHOLD => {
+                self.last_drag_window_x = Some(window_x);
+                self.play_drag_animation(PetAnimation::RunningRight);
+            }
+            _ if delta_x <= -DRAG_DIRECTION_THRESHOLD => {
+                self.last_drag_window_x = Some(window_x);
+                self.play_drag_animation(PetAnimation::RunningLeft);
+            }
+            _ => {}
+        }
+    }
+
+    fn end_software_drag(&mut self) {
+        if !self.dragging {
+            return;
+        }
+        self.dragging = false;
+        self.last_drag_window_x = None;
+        self.drag_cursor_offset = None;
+        self.save_config();
+        if !self.looking {
+            self.restore_base_animation();
+        }
+    }
+
     /// Build a list of `(display_name, pet_id)` from discovered pet directories.
     fn discover_pet_names() -> Vec<(String, String)> {
         let pets = discover_codex_pets();
@@ -315,7 +443,11 @@ impl PetApp {
                 if provider.metadata().id == pet_id {
                     tracing::info!("Switched to pet: {}", provider.metadata().display_name);
                     self.provider = Some(Box::new(provider));
-                    self.play_animation(PetAnimation::Idle);
+                    if self.loop_idle {
+                        self.play_animation(PetAnimation::Idle);
+                    } else {
+                        self.freeze_idle();
+                    }
                     return;
                 }
             }
@@ -346,6 +478,7 @@ impl PetApp {
         }
         config.always_on_top = self.tray.as_ref().is_some_and(|t| t.always_on_top);
         config.idle_animation = self.ambient_timer.is_enabled();
+        config.loop_idle = self.loop_idle;
         config.save();
     }
 

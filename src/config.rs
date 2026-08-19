@@ -11,8 +11,13 @@ pub struct Config {
     pub scale: f64,
     #[serde(default = "default_true")]
     pub always_on_top: bool,
+    /// Occasional random one-shot animations while the pet is idle.
     #[serde(default = "default_false")]
     pub idle_animation: bool,
+    /// Loop the idle clip instead of freezing on its first frame.
+    /// Settings UI can toggle this later; missing configs default to looping.
+    #[serde(default = "default_true")]
+    pub loop_idle: bool,
     /// Language setting: "auto" (system default), "zh", or "en".
     #[serde(default = "default_lang")]
     pub language: String,
@@ -48,6 +53,7 @@ impl Default for Config {
             scale: default_scale(),
             always_on_top: true,
             idle_animation: false,
+            loop_idle: true,
             language: default_lang(),
         }
     }
@@ -100,6 +106,7 @@ mod tests {
         assert_eq!(config.scale, 0.75);
         assert!(config.always_on_top);
         assert!(!config.idle_animation);
+        assert!(config.loop_idle);
     }
 
     #[test]
@@ -110,6 +117,7 @@ mod tests {
             scale: 1.0,
             always_on_top: false,
             idle_animation: false,
+            loop_idle: true,
             language: "auto".to_string(),
         };
         let json = serde_json::to_string(&config).unwrap();
@@ -131,5 +139,6 @@ mod tests {
         let config: Config = serde_json::from_str(json).unwrap();
         assert_eq!(config.scale, 0.75);
         assert!(config.always_on_top);
+        assert!(config.loop_idle);
     }
 }

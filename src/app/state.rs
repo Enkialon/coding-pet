@@ -24,6 +24,11 @@ pub(super) struct PetApp {
     pub(super) next_pointer_poll: Instant,
     pub(super) pointer_look_suppressed_until: Option<Instant>,
     pub(super) last_drag_window_x: Option<i32>,
+    /// Cursor offset from the window origin while a software drag is active.
+    pub(super) drag_cursor_offset: Option<(i32, i32)>,
     pub(super) base_animation: PetAnimation,
     pub(super) pending_animation: Option<PetAnimation>,
+    /// Whether idle should loop. Owned here so a future settings page can
+    /// toggle it without waiting for the next config reload.
+    pub(super) loop_idle: bool,
 }
