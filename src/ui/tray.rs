@@ -18,10 +18,8 @@ pub struct PetTray {
     pub menu_exit: MenuItem,
     /// Per-pet selection menu items: (menu_item, pet_id).
     pub pet_menu_items: Vec<(MenuItem, String)>,
-    // Context menu items for right-click on the pet window.
-    pub menu_idle: MenuItem,
-    pub menu_wave: MenuItem,
-    pub menu_jump: MenuItem,
+    /// Keep action items alive alongside both menus.
+    _action_menu_items: Vec<MenuItem>,
     pub menu_always_on_top: MenuItem,
     pub menu_open_folder: MenuItem,
     /// The context menu (built separately so it can be shown on right-click).
@@ -51,6 +49,9 @@ impl PetTray {
 
         menu.append(&PredefinedMenuItem::separator())?;
 
+        let (action_submenu, mut action_menu_items) = build_action_submenu(&s, "tray")?;
+        menu.append(&action_submenu)?;
+
         // "Select Pet" submenu
         let pet_submenu = Submenu::with_id("select_pet", s.select_pet, true);
         let mut pet_menu_items = Vec::new();
@@ -73,17 +74,14 @@ impl PetTray {
         // -- Build context menu (right-click on pet window) --
         let context_menu = Menu::new();
 
-        let menu_idle = MenuItem::with_id("anim_idle", s.anim_idle, true, None);
-        let menu_wave = MenuItem::with_id("anim_wave", s.anim_wave, true, None);
-        let menu_jump = MenuItem::with_id("anim_jump", s.anim_jump, true, None);
         let menu_always_on_top =
             MenuItem::with_id("always_on_top", s.always_on_top_check, true, None);
         let menu_open_folder = MenuItem::with_id("open_folder", s.open_pet_folder, true, None);
         let menu_exit_ctx = MenuItem::with_id("exit_ctx", s.exit, true, None);
 
-        context_menu.append(&menu_idle)?;
-        context_menu.append(&menu_wave)?;
-        context_menu.append(&menu_jump)?;
+        let (action_submenu_ctx, context_action_items) = build_action_submenu(&s, "context")?;
+        context_menu.append(&action_submenu_ctx)?;
+        action_menu_items.extend(context_action_items);
         context_menu.append(&PredefinedMenuItem::separator())?;
 
         // "Select Pet" submenu (mirrors the tray menu)
@@ -113,9 +111,7 @@ impl PetTray {
             menu_show_hide,
             menu_exit,
             pet_menu_items,
-            menu_idle,
-            menu_wave,
-            menu_jump,
+            _action_menu_items: action_menu_items,
             menu_always_on_top,
             menu_open_folder,
             context_menu,
@@ -161,6 +157,31 @@ impl PetTray {
         };
         self.menu_always_on_top.set_text(text);
     }
+}
+
+fn build_action_submenu(
+    strings: &crate::locale::UiStrings,
+    menu_scope: &str,
+) -> Result<(Submenu, Vec<MenuItem>), Box<dyn std::error::Error>> {
+    let submenu = Submenu::with_id(format!("actions_{menu_scope}"), strings.actions, true);
+    let definitions = [
+        ("anim_idle", strings.anim_idle),
+        ("anim_running", strings.anim_running),
+        ("anim_running_right", strings.anim_running_right),
+        ("anim_running_left", strings.anim_running_left),
+        ("anim_waiting", strings.anim_waiting),
+        ("anim_wave", strings.anim_wave),
+        ("anim_jump", strings.anim_jump),
+        ("anim_review", strings.anim_review),
+        ("anim_failed", strings.anim_failed),
+    ];
+    let mut items = Vec::with_capacity(definitions.len());
+    for (id, label) in definitions {
+        let item = MenuItem::with_id(id, label, true, None);
+        submenu.append(&item)?;
+        items.push(item);
+    }
+    Ok((submenu, items))
 }
 
 /// Poll the global menu event channel for a pending menu event.

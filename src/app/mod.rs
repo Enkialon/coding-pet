@@ -155,6 +155,28 @@ impl PetApp {
         }
     }
 
+    /// A menu selection is an explicit replay request. It takes precedence
+    /// over a stale pointer pose and always resets the animation to frame 0.
+    fn play_menu_animation(&mut self, animation: PetAnimation) {
+        self.looking = false;
+        self.current_look_direction = None;
+        self.look_update_pending = false;
+        self.cursor_leave_deadline = None;
+        self.pending_animation = None;
+        self.base_animation = if matches!(
+            animation,
+            PetAnimation::Running
+                | PetAnimation::RunningRight
+                | PetAnimation::RunningLeft
+                | PetAnimation::Waiting
+        ) {
+            animation
+        } else {
+            PetAnimation::Idle
+        };
+        self.play_animation(animation);
+    }
+
     /// Display one static Codex v2 pose without treating it as a completed
     /// one-shot animation.
     fn show_pose(&mut self, anim: PetAnimation) -> bool {
@@ -340,15 +362,15 @@ impl PetApp {
                 self.save_config();
                 event_loop.exit();
             }
-            "anim_idle" => {
-                self.play_animation(PetAnimation::Idle);
-            }
-            "anim_wave" | "wave" => {
-                self.play_animation(PetAnimation::Waving);
-            }
-            "anim_jump" | "jump" => {
-                self.play_animation(PetAnimation::Jumping);
-            }
+            "anim_idle" => self.play_menu_animation(PetAnimation::Idle),
+            "anim_running" => self.play_menu_animation(PetAnimation::Running),
+            "anim_running_right" => self.play_menu_animation(PetAnimation::RunningRight),
+            "anim_running_left" => self.play_menu_animation(PetAnimation::RunningLeft),
+            "anim_waiting" => self.play_menu_animation(PetAnimation::Waiting),
+            "anim_wave" | "wave" => self.play_menu_animation(PetAnimation::Waving),
+            "anim_jump" | "jump" => self.play_menu_animation(PetAnimation::Jumping),
+            "anim_review" => self.play_menu_animation(PetAnimation::Review),
+            "anim_failed" => self.play_menu_animation(PetAnimation::Failed),
             "always_on_top" => {
                 if let Some(tray) = &mut self.tray {
                     let new_state = !tray.always_on_top;

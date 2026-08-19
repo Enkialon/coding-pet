@@ -281,4 +281,17 @@ mod tests {
         assert!(!animator.is_playing());
         assert!(!animator.is_finished());
     }
+
+    #[test]
+    fn selecting_the_same_animation_restarts_from_first_frame() {
+        let animation = test_animation(3, 10, true);
+        let mut animator = Animator::new();
+        animator.set_animation(PetAnimation::Running, &animation);
+        assert!(animator.tick(Instant::now() + Duration::from_millis(20)));
+        assert_eq!(animator.current_rect().x, 192);
+
+        animator.set_animation(PetAnimation::Running, &animation);
+        assert_eq!(animator.current_rect().x, 0);
+        assert!(animator.is_playing());
+    }
 }
