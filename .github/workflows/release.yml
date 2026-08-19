@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Use stable Rust
         shell: pwsh
@@ -52,7 +52,7 @@ jobs:
           "$hash  $assetName" | Set-Content -Encoding ascii (Join-Path dist "$assetName.sha256")
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coding-pet-${{ github.ref_name }}-windows-x86_64
           path: dist/*
