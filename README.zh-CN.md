@@ -209,6 +209,19 @@ CodingPet 会自动扫描 Codex 的本地宠物目录：
 - **V0.4**：久坐、喝水、眼睛和手腕休息提醒
 - **V0.5**：自定义事件映射、设置界面和插件系统
 
+## 发布
+
+推送语义化版本标签后，GitHub Actions 会自动运行 Windows 发布流程：执行测试、构建优化后的可执行文件、生成 SHA-256 校验文件，并将两个文件发布到 GitHub Release。
+
+```powershell
+# 先更新 Cargo.toml 中的版本号，然后执行：
+git commit -am "chore: release v0.0.2"
+git tag v0.0.2
+git push origin main v0.0.2
+```
+
+标签去掉开头的 `v` 后，必须与 `Cargo.toml` 中的包版本完全一致。
+
 ## 许可证
 
 待定。

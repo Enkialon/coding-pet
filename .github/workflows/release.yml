@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    name: Build Windows release
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Use stable Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Verify tag matches package version
+        shell: pwsh
+        run: |
+          $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
+          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $packageVersion = $metadata.packages[0].version
+
+          if ($tagVersion -ne $packageVersion) {
+            throw "Tag version $tagVersion does not match Cargo package version $packageVersion"
+          }
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          $assetName = "coding-pet-${{ github.ref_name }}-windows-x86_64.exe"
+          $assetPath = Join-Path dist $assetName
+          Copy-Item target\release\coding-pet.exe $assetPath
+
+          $hash = (Get-FileHash -Algorithm SHA256 $assetPath).Hash.ToLowerInvariant()
+          "$hash  $assetName" | Set-Content -Encoding ascii (Join-Path dist "$assetName.sha256")
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coding-pet-${{ github.ref_name }}-windows-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem -File dist | ForEach-Object { $_.FullName }
+          gh release create "${{ github.ref_name }}" $assets `
+            --title "CodingPet ${{ github.ref_name }}" `
+            --generate-notes `
+            --verify-tag

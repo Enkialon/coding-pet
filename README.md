@@ -190,6 +190,19 @@ Missing or corrupt configuration is automatically reset to defaults.
 - **V0.4**: Break reminders (sitting, water, eyes, wrist)
 - **V0.5**: Custom event mapping, settings UI, plugin/adapter system
 
+## Releasing
+
+Pushing a semantic version tag automatically runs the Windows release workflow, tests the project, builds the optimized executable, generates a SHA-256 checksum, and publishes both files to a GitHub Release.
+
+```powershell
+# First update the version in Cargo.toml, then:
+git commit -am "chore: release v0.0.2"
+git tag v0.0.2
+git push origin main v0.0.2
+```
+
+The tag (without its leading `v`) must exactly match the package version in `Cargo.toml`.
+
 ## License
 
 [TBD]
