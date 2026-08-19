@@ -191,6 +191,17 @@ Missing or corrupt configuration is automatically reset to defaults.
 - Codex v2 asset contract in the pet resource layer
 - Independent provider-neutral protocol in the coding-tool integration layer
 
+```text
+src/
+├── app/          # lifecycle, event dispatch, state, and pointer interaction
+├── animation/    # animation playback and ambient timing
+├── integration/  # CLI, HTTP server, runtime, and coding-tool events
+├── pet/          # Codex assets, shared models, and provider contract
+├── platform/     # native Windows and macOS window/rendering backends
+├── ui/           # tray and future settings UI
+└── main.rs       # process entry point
+```
+
 ## Roadmap
 
 - **V0.2**: Provider adapters and configurable event-to-animation mappings

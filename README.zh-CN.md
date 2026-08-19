@@ -208,6 +208,17 @@ CodingPet 会自动扫描 Codex 的本地宠物目录：
 - 宠物资源层采用 Codex v2 契约
 - 工具集成层采用独立的提供方无关事件协议
 
+```text
+src/
+├── app/          # 生命周期、事件分发、状态和鼠标交互
+├── animation/    # 动画播放和环境动画计时
+├── integration/  # CLI、HTTP 服务、运行时和编程工具事件
+├── pet/          # Codex 资源、共享模型和 Provider 契约
+├── platform/     # Windows 与 macOS 原生窗口和渲染后端
+├── ui/           # 托盘及未来的设置界面
+└── main.rs       # 进程入口
+```
+
 ## 路线图
 
 - **V0.2**：提供方适配器和可配置的事件动画映射

@@ -8,7 +8,7 @@ mod integration;
 mod locale;
 mod pet;
 mod platform;
-mod tray;
+mod ui;
 
 fn main() {
     match integration::try_run_cli() {

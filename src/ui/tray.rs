@@ -171,7 +171,7 @@ pub fn check_menu_event() -> Option<MenuEvent> {
 /// Load the project icon embedded in the executable and resize it for the tray.
 fn load_app_icon() -> Result<Icon, Box<dyn std::error::Error>> {
     const TRAY_ICON_SIZE: u32 = 32;
-    let source = image::load_from_memory(include_bytes!("../icon.png"))?;
+    let source = image::load_from_memory(include_bytes!("../../icon.png"))?;
     let rgba = source
         .resize_exact(
             TRAY_ICON_SIZE,
