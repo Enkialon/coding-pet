@@ -22,9 +22,7 @@ impl Locale {
         Self::system_locale()
     }
 
-    /// Detect system UI language on Windows.
-    /// Uses GetUserDefaultUILanguage (display language) first,
-    /// then falls back to GetSystemDefaultUILanguage (OS install language).
+    /// Detect the operating system UI language.
     fn system_locale() -> Self {
         #[cfg(windows)]
         {
@@ -37,11 +35,23 @@ impl Locale {
                 tracing::info!(
                     "Locale detection: user_lang=0x{:04X} (primary=0x{:02X}), \
                      sys_lang=0x{:04X} (primary=0x{:02X})",
-                    user_lang, user_primary, sys_lang, sys_primary,
+                    user_lang,
+                    user_primary,
+                    sys_lang,
+                    sys_primary,
                 );
 
                 // 0x04 = Chinese
                 if user_primary == 0x04 || sys_primary == 0x04 {
+                    return Locale::Zh;
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(locale) = sys_locale::get_locale() {
+                tracing::info!("Locale detection: {locale}");
+                if locale.to_ascii_lowercase().starts_with("zh") {
                     return Locale::Zh;
                 }
             }

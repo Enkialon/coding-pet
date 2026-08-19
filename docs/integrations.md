@@ -44,9 +44,9 @@ Do not copy `integration.json` into logs or repositories.
 The same executable can be called by hooks and scripts:
 
 ```powershell
-coding-pet.exe emit agent.turn.started --source codex --session turn-123
-coding-pet.exe emit agent.input.required --source claude-code --message "Approval needed"
-coding-pet.exe emit agent.turn.completed --source cursor --data '{"duration_ms":1200}'
+coding-pet emit agent.turn.started --source codex --session turn-123
+coding-pet emit agent.input.required --source claude-code --message "Approval needed"
+coding-pet emit agent.turn.completed --source cursor --data '{"duration_ms":1200}'
 ```
 
 Available options are `--source`, `--id`, `--session`, `--cwd`, `--message`, `--timestamp`, and

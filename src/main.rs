@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod animation;
 mod app;
@@ -7,9 +7,8 @@ mod error;
 mod integration;
 mod locale;
 mod pet;
-mod renderer;
+mod platform;
 mod tray;
-mod window;
 
 fn main() {
     match integration::try_run_cli() {

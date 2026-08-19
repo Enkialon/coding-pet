@@ -1,23 +1,25 @@
-// Window management — Phase 5
+// Native Windows window management.
 // Creates a borderless, always-on-top transparent window for the desktop pet.
 // Transparency is handled entirely via UpdateLayeredWindow in the renderer,
 // so we do NOT set winit's `with_transparent(true)`.
 // Adds drag support, multi-monitor position validation, and DPI queries.
 
+use std::sync::Arc;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_THICKFRAME,
+};
 use winit::event_loop::ActiveEventLoop;
 use winit::platform::windows::WindowAttributesExtWindows;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE,
-    HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_THICKFRAME,
-};
+
+use super::NativeWindowHandle;
 
 #[allow(dead_code)]
 pub struct PetWindow {
-    pub window: Window,
+    pub window: Arc<Window>,
     pub hwnd: isize,
     pub width: u32,
     pub height: u32,
@@ -43,9 +45,11 @@ impl PetWindow {
             // is managed by UpdateLayeredWindow + WS_EX_LAYERED in the renderer.
             .with_visible(true);
 
-        let window = event_loop
-            .create_window(attrs)
-            .map_err(|e| crate::error::AppError::Window(e.to_string()))?;
+        let window = Arc::new(
+            event_loop
+                .create_window(attrs)
+                .map_err(|e| crate::error::AppError::Window(e.to_string()))?,
+        );
 
         // Position the window on screen
         window.set_outer_position(winit::dpi::PhysicalPosition::new(pos_x, pos_y));
@@ -78,7 +82,10 @@ impl PetWindow {
             SetWindowPos(
                 hwnd as _,
                 HWND_TOPMOST,
-                0, 0, 0, 0,
+                0,
+                0,
+                0,
+                0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
         }
@@ -94,6 +101,38 @@ impl PetWindow {
     /// Initiate a window drag (allows the user to move the pet by clicking and dragging).
     pub fn drag_window(&self) -> bool {
         self.window.drag_window().is_ok()
+    }
+
+    pub fn native_handle(&self) -> Result<NativeWindowHandle, crate::error::AppError> {
+        Ok(NativeWindowHandle::Win32(self.hwnd))
+    }
+
+    pub fn set_always_on_top(&self, enabled: bool) {
+        unsafe {
+            let ex = GetWindowLongPtrW(self.hwnd as _, GWL_EXSTYLE);
+            let base = (ex as usize & !WS_EX_TOPMOST as usize)
+                | WS_EX_LAYERED as usize
+                | WS_EX_TOOLWINDOW as usize;
+            let style = if enabled {
+                base | WS_EX_TOPMOST as usize
+            } else {
+                base
+            };
+            SetWindowLongPtrW(self.hwnd as _, GWL_EXSTYLE, style as _);
+            SetWindowPos(
+                self.hwnd as _,
+                if enabled {
+                    HWND_TOPMOST
+                } else {
+                    windows_sys::Win32::UI::WindowsAndMessaging::HWND_NOTOPMOST
+                },
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
     }
 
     /// Set the outer position of the window in physical pixels.

@@ -1,8 +1,8 @@
-pub mod model;
 pub mod codex;
+pub mod model;
 
-use std::path::PathBuf;
 use model::{Animation, PetAnimation, PetMetadata};
+use std::path::PathBuf;
 
 pub trait PetProvider {
     fn metadata(&self) -> &PetMetadata;
@@ -13,13 +13,16 @@ pub trait PetProvider {
     fn spritesheet_stride(&self) -> usize;
 }
 
-/// Scan `%USERPROFILE%\.codex\pets\` for directories containing spritesheet files.
+/// Return the Codex pets directory under the current user's home directory.
+pub fn codex_pets_dir() -> Option<PathBuf> {
+    directories::UserDirs::new().map(|dirs| dirs.home_dir().join(".codex").join("pets"))
+}
+
+/// Scan `~/.codex/pets/` for directories containing spritesheet files.
 pub fn discover_codex_pets() -> Vec<PathBuf> {
-    let home = std::env::var("USERPROFILE")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("C:\\Users\\Default"));
-    let pets_dir = home.join(".codex").join("pets");
+    let Some(pets_dir) = codex_pets_dir() else {
+        return Vec::new();
+    };
 
     if !pets_dir.is_dir() {
         return Vec::new();
@@ -30,9 +33,7 @@ pub fn discover_codex_pets() -> Vec<PathBuf> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                if path.join("spritesheet.webp").exists()
-                    || path.join("spritesheet.png").exists()
-                {
+                if path.join("spritesheet.webp").exists() || path.join("spritesheet.png").exists() {
                     pets.push(path);
                 }
             }

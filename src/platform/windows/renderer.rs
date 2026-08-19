@@ -1,18 +1,16 @@
-// GDI renderer — Phase 2
+// Native Windows GDI renderer.
 // All unsafe Win32 GDI code is isolated here.
 // Renders a premultiplied-BGRA pixel buffer to a WS_EX_LAYERED window
 // via a DIB section and UpdateLayeredWindow.
 
+use super::PetWindow;
 use crate::pet::model::SpriteRect;
 use windows_sys::Win32::Foundation::{GetLastError, POINT, RECT, SIZE};
 use windows_sys::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject,
-    AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
-    DIB_RGB_COLORS, HBITMAP, HDC,
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, AC_SRC_ALPHA,
+    AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS, HBITMAP, HDC,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetWindowRect, UpdateLayeredWindow, ULW_ALPHA,
-};
+use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowRect, UpdateLayeredWindow, ULW_ALPHA};
 
 pub struct Renderer {
     hwnd: isize,
@@ -26,7 +24,12 @@ pub struct Renderer {
 
 impl Renderer {
     /// Create a new renderer backed by a DIB section for the given HWND.
-    pub fn new(hwnd: isize, width: u32, height: u32) -> Result<Self, crate::error::AppError> {
+    pub fn new(
+        window: &PetWindow,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, crate::error::AppError> {
+        let hwnd = window.hwnd;
         unsafe {
             // Create a memory device context (screen DC = 0 / null)
             let mem_dc = CreateCompatibleDC(std::ptr::null_mut());
@@ -85,7 +88,7 @@ impl Renderer {
 
     /// Blit a sprite region from a premultiplied-BGRA spritesheet into the DIB
     /// and push the result to the layered window via UpdateLayeredWindow.
-    pub fn draw_frame(&self, spritesheet: &[u8], stride: usize, rect: SpriteRect) {
+    pub fn draw_frame(&mut self, spritesheet: &[u8], stride: usize, rect: SpriteRect) {
         let w = self.width as usize;
         let h = self.height as usize;
         let dib_stride = w * 4;
@@ -99,8 +102,7 @@ impl Renderer {
             let copy_w = (rect.width as usize).min(w);
             let copy_h = (rect.height as usize).min(h);
             for row in 0..copy_h {
-                let src_offset =
-                    ((rect.y as usize) + row) * stride + (rect.x as usize) * 4;
+                let src_offset = ((rect.y as usize) + row) * stride + (rect.x as usize) * 4;
                 let dst_offset = row * dib_stride;
                 let bytes = copy_w * 4;
                 if src_offset + bytes <= spritesheet.len() {
@@ -140,15 +142,15 @@ impl Renderer {
             };
 
             let result = UpdateLayeredWindow(
-                self.hwnd as _,   // hwnd
-                std::ptr::null_mut(),  // hdcDst (screen)
-                &dst_pt,          // pptDst
-                &sz,              // psize
-                self.mem_dc,      // hdcSrc
-                &src_pt,          // pptSrc
-                0,                // crKey (no color key)
-                &blend,           // pblend
-                ULW_ALPHA,        // dwFlags
+                self.hwnd as _,       // hwnd
+                std::ptr::null_mut(), // hdcDst (screen)
+                &dst_pt,              // pptDst
+                &sz,                  // psize
+                self.mem_dc,          // hdcSrc
+                &src_pt,              // pptSrc
+                0,                    // crKey (no color key)
+                &blend,               // pblend
+                ULW_ALPHA,            // dwFlags
             );
             if result == 0 {
                 let err = GetLastError();
@@ -156,6 +158,9 @@ impl Renderer {
             }
         }
     }
+
+    /// The layered GDI surface has a fixed physical size.
+    pub fn resize_surface(&mut self, _width: u32, _height: u32) {}
 }
 
 impl Drop for Renderer {

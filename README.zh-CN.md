@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-CodingPet 是一个使用纯 Rust 编写的轻量级 Windows 程序员桌面宠物。
+CodingPet 是一个使用 Rust 编写的轻量级 Windows 与 macOS 程序员桌面宠物。
 
 它兼容 Codex 自定义宠物资源格式，可以直接在桌面显示动画宠物，并通过统一的本地事件协议接入 Codex、Cursor、Claude Code、IDE、Git 和 CI 等编程工具。
 
@@ -16,8 +16,8 @@ CodingPet 是一个使用纯 Rust 编写的轻量级 Windows 程序员桌面宠�
 - 支持每显示器 DPI 感知
 - 加载 Codex v2 宠物图集（1536×2288、8×11、PNG/WebP）
 - 迁移期间兼容旧版 Codex v1 8×9 宠物
-- 自动发现 `%USERPROFILE%\.codex\pets\` 下的宠物
-- 系统托盘显示、隐藏和退出
+- 自动发现 `~/.codex/pets/` 下的宠物
+- Windows 系统托盘或 macOS 菜单栏图标，可显示、隐藏和退出
 - 右键菜单播放动画和切换宠物
 - 可选的随机待机动画
 - 自动保存宠物选择、窗口位置和设置
@@ -26,7 +26,7 @@ CodingPet 是一个使用纯 Rust 编写的轻量级 Windows 程序员桌面宠�
 
 ## 构建
 
-需要 Windows 和 Rust stable 工具链。
+需要 Windows 或 macOS，以及 Rust stable 工具链。
 
 ```bash
 cargo build --release
@@ -36,16 +36,21 @@ cargo build --release
 
 ```text
 target/release/coding-pet.exe
+target/release/coding-pet
 ```
 
-它是单文件可执行程序，不需要额外运行时。
+Windows 产物是单文件可执行程序；GitHub Release 会提供同时支持 Intel 和 Apple Silicon 的 macOS `.app` 压缩包。两者都不需要额外运行时。
 
 ## 运行
 
-双击 `coding-pet.exe`，或者在终端运行：
+双击下载的应用，或者在终端运行本地构建产物：
 
 ```powershell
 .\target\release\coding-pet.exe
+```
+
+```bash
+./target/release/coding-pet
 ```
 
 启用调试日志：
@@ -74,7 +79,7 @@ Codex、Claude Code、Cursor、IDE、Git 和 CI 适配器只需要把自身生�
 CodingPet 会自动扫描 Codex 的本地宠物目录：
 
 ```text
-%USERPROFILE%\.codex\pets\
+~/.codex/pets/
 ```
 
 ### 目录结构
@@ -188,17 +193,18 @@ CodingPet 会自动扫描 Codex 的本地宠物目录：
 |---|---|
 | 空闲 CPU | 约 0%（事件驱动，无忙轮询） |
 | 动画 CPU | 小于 2% |
-| 常驻内存 | 小于 30 MB（典型约 14 MB） |
+| 常驻内存 | Windows GDI 后端小于 30 MB（典型约 14 MB） |
 | 启动速度 | 即时启动，无启动画面和网络请求 |
 
 ## 架构
 
 - 纯 Rust、单线程事件循环
-- 使用 Win32 `UpdateLayeredWindow` 实现逐像素透明
+- 动画、宠物资源、Hook 和配置组成跨平台核心
+- Windows 后端使用 Win32 `UpdateLayeredWindow` 实现逐像素透明
+- macOS 后端使用透明 AppKit 窗口和事件驱动的 Metal 表面
 - 使用 `winit` 处理窗口和输入事件
-- 使用 `windows-sys` 进行轻量 Win32 FFI 调用
 - 仅在动画帧变化时重绘
-- 不使用 GPU、Web 技术或外部运行时
+- 不使用 WebView 或外部运行时；Windows 后端仍为纯 CPU/GDI
 - 宠物资源层采用 Codex v2 契约
 - 工具集成层采用独立的提供方无关事件协议
 
@@ -211,7 +217,7 @@ CodingPet 会自动扫描 Codex 的本地宠物目录：
 
 ## 发布
 
-推送语义化版本标签后，GitHub Actions 会自动运行 Windows 发布流程：执行测试、构建优化后的可执行文件、生成 SHA-256 校验文件，并将两个文件发布到 GitHub Release。
+推送语义化版本标签后，GitHub Actions 会自动测试 Windows 和 macOS，构建 Windows x86_64 可执行文件与 macOS 通用应用，生成 SHA-256 校验文件，并发布到 GitHub Release。
 
 ```powershell
 # 先更新 Cargo.toml 中的版本号，然后执行：

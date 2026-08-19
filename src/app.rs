@@ -11,10 +11,9 @@ use crate::integration::{AgentEventKind, AppUserEvent, IntegrationServer};
 use crate::locale::Locale;
 use crate::pet::codex::CodexPetProvider;
 use crate::pet::model::{Animation, PetAnimation, SpriteRect};
-use crate::pet::{discover_codex_pets, PetProvider};
-use crate::renderer::Renderer;
+use crate::pet::{codex_pets_dir, discover_codex_pets, PetProvider};
+use crate::platform::{self, PetWindow, Renderer};
 use crate::tray::{check_menu_event, PetTray};
-use crate::window::PetWindow;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -337,10 +336,7 @@ impl PetApp {
 
     /// Get the pets directory path for "Open Folder" functionality.
     fn pets_folder_path() -> Option<std::path::PathBuf> {
-        let home = std::env::var("USERPROFILE")
-            .ok()
-            .map(std::path::PathBuf::from)?;
-        let path = home.join(".codex").join("pets");
+        let path = codex_pets_dir()?;
         if path.is_dir() {
             Some(path)
         } else {
@@ -365,7 +361,11 @@ impl PetApp {
     }
 
     /// Handle a menu event from the tray or context menu.
-    fn handle_menu_event(&mut self, event: &tray_icon::menu::MenuEvent, event_loop: &ActiveEventLoop) {
+    fn handle_menu_event(
+        &mut self,
+        event: &tray_icon::menu::MenuEvent,
+        event_loop: &ActiveEventLoop,
+    ) {
         let id = event.id().0.as_ref();
 
         match id {
@@ -394,46 +394,17 @@ impl PetApp {
                 if let Some(tray) = &mut self.tray {
                     let new_state = !tray.always_on_top;
                     tray.set_always_on_top_text(new_state);
-                    // Toggle WS_EX_TOPMOST via windows-sys
                     if let Some(win) = &self.window {
-                        use windows_sys::Win32::UI::WindowsAndMessaging::{
-                            GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
-                            HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
-                            SWP_NOSIZE, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-                        };
-                        unsafe {
-                            let ex = GetWindowLongPtrW(win.hwnd as _, GWL_EXSTYLE);
-                            let base = (ex as usize & !WS_EX_TOPMOST as usize)
-                                | WS_EX_LAYERED as usize
-                                | WS_EX_TOOLWINDOW as usize;
-                            let new_style = if new_state {
-                                base | WS_EX_TOPMOST as usize
-                            } else {
-                                base
-                            };
-                            SetWindowLongPtrW(win.hwnd as _, GWL_EXSTYLE, new_style as _);
-                            // Must call SetWindowPos to actually change the Z-order
-                            let hwnd_insert_after = if new_state {
-                                HWND_TOPMOST
-                            } else {
-                                HWND_NOTOPMOST
-                            };
-                            SetWindowPos(
-                                win.hwnd as _,
-                                hwnd_insert_after,
-                                0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                            );
-                        }
+                        win.set_always_on_top(new_state);
                     }
                     tracing::info!("Always on top: {}", new_state);
                 }
             }
             "open_folder" | "open_folder_tray" => {
                 if let Some(path) = Self::pets_folder_path() {
-                    let _ = std::process::Command::new("explorer")
-                        .arg(path.as_os_str())
-                        .spawn();
+                    if let Err(error) = platform::open_folder(&path) {
+                        tracing::warn!("Could not open pets folder: {error}");
+                    }
                     tracing::info!("Opened pets folder: {}", path.display());
                 } else {
                     tracing::warn!("Pets folder not found");
@@ -479,12 +450,23 @@ fn stabilized_look_direction_index(
     Some(quantize_look_angle(angle, current))
 }
 
+fn normalize_cursor_position(
+    x: f64,
+    y: f64,
+    surface_width: u32,
+    surface_height: u32,
+) -> (i32, i32) {
+    (
+        (x * f64::from(WIN_WIDTH) / f64::from(surface_width.max(1))) as i32,
+        (y * f64::from(WIN_HEIGHT) / f64::from(surface_height.max(1))) as i32,
+    )
+}
+
 fn quantize_look_angle(angle: f64, current: Option<u8>) -> u8 {
     let step = std::f64::consts::TAU / 16.0;
     if let Some(current) = current {
         let center = f64::from(current) * step;
-        let distance = (angle - center + std::f64::consts::PI)
-            .rem_euclid(std::f64::consts::TAU)
+        let distance = (angle - center + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
             - std::f64::consts::PI;
         if distance.abs() <= step / 2.0 + LOOK_ANGLE_HYSTERESIS {
             return current;
@@ -498,7 +480,7 @@ fn quantize_look_angle(angle: f64, current: Option<u8>) -> u8 {
 fn try_load_pet(preferred_id: &str) -> Option<Box<dyn PetProvider>> {
     let pets = discover_codex_pets();
     if pets.is_empty() {
-        tracing::info!("No Codex pets discovered in %USERPROFILE%\\.codex\\pets\\");
+        tracing::info!("No Codex pets discovered in ~/.codex/pets/");
         return None;
     }
 
@@ -518,7 +500,10 @@ fn try_load_pet(preferred_id: &str) -> Option<Box<dyn PetProvider>> {
                 }
             }
         }
-        tracing::warn!("Preferred pet '{}' not found, falling back to first available", preferred_id);
+        tracing::warn!(
+            "Preferred pet '{}' not found, falling back to first available",
+            preferred_id
+        );
     }
 
     // Fall back to first successfully loaded pet
@@ -526,10 +511,7 @@ fn try_load_pet(preferred_id: &str) -> Option<Box<dyn PetProvider>> {
         match CodexPetProvider::load(pet_dir) {
             Ok(provider) => return Some(Box::new(provider)),
             Err(e) => {
-                tracing::warn!(
-                    "Failed to load pet from {}: {e}",
-                    pet_dir.display()
-                );
+                tracing::warn!("Failed to load pet from {}: {e}", pet_dir.display());
             }
         }
     }
@@ -548,7 +530,11 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
         let config = Config::load();
         let (pos_x, pos_y) = if config.position.x != 0 || config.position.y != 0 {
             // Validate saved position is still on a monitor
-            if PetWindow::is_position_on_any_monitor(config.position.x, config.position.y, event_loop) {
+            if PetWindow::is_position_on_any_monitor(
+                config.position.x,
+                config.position.y,
+                event_loop,
+            ) {
                 (config.position.x, config.position.y)
             } else {
                 tracing::warn!(
@@ -572,7 +558,7 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
             }
         };
 
-        let renderer = match Renderer::new(win.hwnd, WIN_WIDTH, WIN_HEIGHT) {
+        let mut renderer = match Renderer::new(&win, WIN_WIDTH, WIN_HEIGHT) {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("Failed to create renderer: {e}");
@@ -592,11 +578,7 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
 
         // Apply always_on_top from config on startup
         if !config.always_on_top {
-            unsafe {
-                use windows_sys::Win32::UI::WindowsAndMessaging::*;
-                let ex = GetWindowLongPtrW(win.hwnd as _, GWL_EXSTYLE);
-                SetWindowLongPtrW(win.hwnd as _, GWL_EXSTYLE, ex & !(WS_EX_TOPMOST as isize));
-            }
+            win.set_always_on_top(false);
         }
 
         // Create the system tray
@@ -618,9 +600,7 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
         } else {
             "test fallback"
         };
-        tracing::info!(
-            "Window and renderer initialised — animation started ({source})"
-        );
+        tracing::info!("Window and renderer initialised — animation started ({source})");
         self.window = Some(win);
         self.renderer = Some(renderer);
     }
@@ -671,15 +651,32 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                 tracing::info!("Close requested — keeping desktop pet running");
             }
             WindowEvent::RedrawRequested => {
-                if let Some(renderer) = self.renderer.as_ref() {
-                    let rect = self.animator.current_rect();
-                    let (pixels, stride) = self.active_spritesheet();
+                let rect = self.animator.current_rect();
+                let (pixels, stride) = if let Some(provider) = &self.provider {
+                    (provider.spritesheet_pixels(), provider.spritesheet_stride())
+                } else {
+                    (self.test_spritesheet.as_slice(), self.test_stride)
+                };
+                if let Some(renderer) = self.renderer.as_mut() {
                     renderer.draw_frame(pixels, stride, rect);
                 }
             }
+            WindowEvent::Resized(size) => {
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.resize_surface(size.width, size.height);
+                }
+                if let Some(window) = &self.window {
+                    window.window.request_redraw();
+                }
+            }
             WindowEvent::CursorMoved { position, .. } => {
-                self.cursor_x = position.x as i32;
-                self.cursor_y = position.y as i32;
+                let size = self
+                    .window
+                    .as_ref()
+                    .map(|window| window.window.inner_size())
+                    .unwrap_or(winit::dpi::PhysicalSize::new(WIN_WIDTH, WIN_HEIGHT));
+                (self.cursor_x, self.cursor_y) =
+                    normalize_cursor_position(position.x, position.y, size.width, size.height);
                 self.queue_look_update(Instant::now(), false);
             }
             WindowEvent::CursorEntered { .. } => {
@@ -723,10 +720,7 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                     PetAnimation::RunningLeft
                 };
                 self.play_drag_animation(initial_animation);
-                let drag_started = self
-                    .window
-                    .as_ref()
-                    .is_some_and(|win| win.drag_window());
+                let drag_started = self.window.as_ref().is_some_and(|win| win.drag_window());
                 if !drag_started {
                     self.dragging = false;
                     self.last_drag_window_x = None;
@@ -758,7 +752,12 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
             } => {
                 // Show context menu at cursor position
                 if let (Some(tray), Some(win)) = (&self.tray, &self.window) {
-                    tray.show_context_menu(win.hwnd, self.cursor_x, self.cursor_y);
+                    if let Ok(handle) = win.native_handle() {
+                        let size = win.window.inner_size();
+                        let x = self.cursor_x * size.width as i32 / WIN_WIDTH as i32;
+                        let y = self.cursor_y * size.height as i32 / WIN_HEIGHT as i32;
+                        tray.show_context_menu(handle, x, y);
+                    }
                 }
             }
             _ => {}
@@ -832,15 +831,12 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
         } else {
             None
         };
-        let ambient_time = if self.ambient_timer.is_enabled()
-            && self.visible
-            && !self.dragging
-            && !self.looking
-        {
-            Some(self.ambient_timer.next_trigger_time())
-        } else {
-            None
-        };
+        let ambient_time =
+            if self.ambient_timer.is_enabled() && self.visible && !self.dragging && !self.looking {
+                Some(self.ambient_timer.next_trigger_time())
+            } else {
+                None
+            };
         let look_time = if self.look_update_pending && self.cursor_inside && !self.dragging {
             Some(
                 self.last_look_update
@@ -932,7 +928,9 @@ fn generate_test_spritesheet(total_width: u32, height: u32) -> Vec<u8> {
 /// Public helper so main.rs can launch the event loop.
 pub fn run() -> Result<(), crate::error::AppError> {
     let config = Config::load();
-    let event_loop = EventLoop::<AppUserEvent>::with_user_event()
+    let mut builder = EventLoop::<AppUserEvent>::with_user_event();
+    platform::configure_event_loop(&mut builder);
+    let event_loop = builder
         .build()
         .map_err(|e| crate::error::AppError::Window(e.to_string()))?;
     let _integration_server = match IntegrationServer::start(event_loop.create_proxy()) {
@@ -955,7 +953,10 @@ mod tests {
 
     #[test]
     fn look_direction_cardinals_follow_codex_clockwise_order() {
-        assert_eq!(stabilized_look_direction_index(96, 0, 192, 208, None), Some(0));
+        assert_eq!(
+            stabilized_look_direction_index(96, 0, 192, 208, None),
+            Some(0)
+        );
         assert_eq!(
             stabilized_look_direction_index(191, 104, 192, 208, None),
             Some(4)
@@ -976,21 +977,33 @@ mod tests {
             stabilized_look_direction_index(191, 0, 192, 208, None),
             Some(2)
         );
-        assert_eq!(stabilized_look_direction_index(96, 104, 192, 208, None), None);
-        assert_eq!(stabilized_look_direction_index(105, 110, 192, 208, None), None);
+        assert_eq!(
+            stabilized_look_direction_index(96, 104, 192, 208, None),
+            None
+        );
+        assert_eq!(
+            stabilized_look_direction_index(105, 110, 192, 208, None),
+            None
+        );
     }
 
     #[test]
     fn look_deadzone_uses_enter_exit_hysteresis() {
         // Twenty pixels right of center is too close to enter Look.
-        assert_eq!(stabilized_look_direction_index(116, 104, 192, 208, None), None);
+        assert_eq!(
+            stabilized_look_direction_index(116, 104, 192, 208, None),
+            None
+        );
         // Once looking, the same point remains in the current direction.
         assert_eq!(
             stabilized_look_direction_index(116, 104, 192, 208, Some(4)),
             Some(4)
         );
         // Moving inside the smaller exit radius returns to the base state.
-        assert_eq!(stabilized_look_direction_index(106, 104, 192, 208, Some(4)), None);
+        assert_eq!(
+            stabilized_look_direction_index(106, 104, 192, 208, Some(4)),
+            None
+        );
     }
 
     #[test]
@@ -1002,5 +1015,11 @@ mod tests {
         // until the cursor clears the additional 6° hysteresis margin.
         assert_eq!(quantize_look_angle(thirteen_degrees, Some(0)), 0);
         assert_eq!(quantize_look_angle(eighteen_degrees, Some(0)), 1);
+    }
+
+    #[test]
+    fn cursor_position_is_normalized_on_retina_surfaces() {
+        assert_eq!(normalize_cursor_position(192.0, 208.0, 384, 416), (96, 104));
+        assert_eq!(normalize_cursor_position(96.0, 104.0, 192, 208), (96, 104));
     }
 }

@@ -5,6 +5,7 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use crate::locale::{ui_strings, Locale};
+use crate::platform::NativeWindowHandle;
 
 /// Manages the system tray icon and its associated menus.
 #[allow(dead_code)]
@@ -54,12 +55,7 @@ impl PetTray {
         let pet_submenu = Submenu::with_id("select_pet", s.select_pet, true);
         let mut pet_menu_items = Vec::new();
         for (display_name, pet_id) in pet_names {
-            let item = MenuItem::with_id(
-                format!("pet_{}", pet_id),
-                display_name,
-                true,
-                None,
-            );
+            let item = MenuItem::with_id(format!("pet_{}", pet_id), display_name, true, None);
             pet_submenu.append(&item)?;
             pet_menu_items.push((item, pet_id.clone()));
         }
@@ -82,8 +78,7 @@ impl PetTray {
         let menu_jump = MenuItem::with_id("anim_jump", s.anim_jump, true, None);
         let menu_always_on_top =
             MenuItem::with_id("always_on_top", s.always_on_top_check, true, None);
-        let menu_open_folder =
-            MenuItem::with_id("open_folder", s.open_pet_folder, true, None);
+        let menu_open_folder = MenuItem::with_id("open_folder", s.open_pet_folder, true, None);
         let menu_exit_ctx = MenuItem::with_id("exit_ctx", s.exit, true, None);
 
         context_menu.append(&menu_idle)?;
@@ -94,12 +89,7 @@ impl PetTray {
         // "Select Pet" submenu (mirrors the tray menu)
         let pet_submenu_ctx = Submenu::with_id("select_pet_ctx", s.select_pet, true);
         for (display_name, pet_id) in pet_names {
-            let item = MenuItem::with_id(
-                format!("pet_{}", pet_id),
-                display_name,
-                true,
-                None,
-            );
+            let item = MenuItem::with_id(format!("pet_{}", pet_id), display_name, true, None);
             pet_submenu_ctx.append(&item)?;
         }
         context_menu.append(&pet_submenu_ctx)?;
@@ -139,16 +129,24 @@ impl PetTray {
     /// anchored to the pet window.
     ///
     /// # Safety
-    /// `hwnd` must be a valid window handle.
-    pub fn show_context_menu(&self, hwnd: isize, x: i32, y: i32) {
+    /// The native handle must remain valid while the menu is shown.
+    pub fn show_context_menu(&self, handle: NativeWindowHandle, x: i32, y: i32) {
         use tray_icon::menu::ContextMenu;
         let position = tray_icon::menu::dpi::PhysicalPosition {
             x: x as f64,
             y: y as f64,
         };
+        #[cfg(target_os = "windows")]
         unsafe {
+            let NativeWindowHandle::Win32(hwnd) = handle;
             self.context_menu
                 .show_context_menu_for_hwnd(hwnd, Some(position.into()));
+        }
+        #[cfg(target_os = "macos")]
+        unsafe {
+            let NativeWindowHandle::AppKit(view) = handle;
+            self.context_menu
+                .show_context_menu_for_nsview(view, Some(position.into()));
         }
     }
 

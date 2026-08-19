@@ -4,9 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::error::AppError;
 use super::model::{Animation, PetAnimation, PetMetadata, SpriteRect};
 use super::PetProvider;
+use crate::error::AppError;
 
 // ---------------------------------------------------------------------------
 // Spritesheet layout constants
@@ -17,7 +17,7 @@ const CODEX_V1_ROWS: u32 = 9;
 const CODEX_V2_ROWS: u32 = 11;
 const CODEX_CELL_WIDTH: u32 = 192;
 const CODEX_CELL_HEIGHT: u32 = 208;
-const CODEX_SHEET_WIDTH: u32 = CODEX_COLUMNS * CODEX_CELL_WIDTH;   // 1536
+const CODEX_SHEET_WIDTH: u32 = CODEX_COLUMNS * CODEX_CELL_WIDTH; // 1536
 const CODEX_V1_SHEET_HEIGHT: u32 = CODEX_V1_ROWS * CODEX_CELL_HEIGHT; // 1872
 const CODEX_V2_SHEET_HEIGHT: u32 = CODEX_V2_ROWS * CODEX_CELL_HEIGHT; // 2288
 
@@ -28,17 +28,11 @@ const CODEX_V2_SHEET_HEIGHT: u32 = CODEX_V2_ROWS * CODEX_CELL_HEIGHT; // 2288
 fn codex_animation_def(anim: PetAnimation) -> Option<(u32, Vec<u64>, bool)> {
     match anim {
         PetAnimation::Idle => Some((0, vec![280, 110, 110, 140, 140, 320], true)),
-        PetAnimation::RunningRight => {
-            Some((1, vec![120, 120, 120, 120, 120, 120, 120, 220], true))
-        }
-        PetAnimation::RunningLeft => {
-            Some((2, vec![120, 120, 120, 120, 120, 120, 120, 220], true))
-        }
+        PetAnimation::RunningRight => Some((1, vec![120, 120, 120, 120, 120, 120, 120, 220], true)),
+        PetAnimation::RunningLeft => Some((2, vec![120, 120, 120, 120, 120, 120, 120, 220], true)),
         PetAnimation::Waving => Some((3, vec![140, 140, 140, 280], false)),
         PetAnimation::Jumping => Some((4, vec![140, 140, 140, 140, 280], false)),
-        PetAnimation::Failed => {
-            Some((5, vec![140, 140, 140, 140, 140, 140, 140, 240], false))
-        }
+        PetAnimation::Failed => Some((5, vec![140, 140, 140, 140, 140, 140, 140, 240], false)),
         PetAnimation::Waiting => Some((6, vec![150, 150, 150, 150, 150, 260], true)),
         PetAnimation::Running => Some((7, vec![120, 120, 120, 120, 120, 220], true)),
         PetAnimation::Review => Some((8, vec![150, 150, 150, 150, 150, 280], false)),
@@ -86,6 +80,17 @@ fn compute_sprite_rect(row: u32, col: u32) -> SpriteRect {
 /// Validate that a resource path stays within the pet directory (no traversal).
 #[allow(dead_code)]
 fn validate_resource_path(pet_dir: &Path, resource_path: &Path) -> Result<PathBuf, AppError> {
+    // Manifests may be copied between Windows and Unix. Normalize both kinds
+    // of separators for traversal detection before using native Path rules.
+    if resource_path
+        .to_string_lossy()
+        .split(['/', '\\'])
+        .any(|component| component == "..")
+    {
+        return Err(AppError::Pet(
+            "Resource path contains '..' traversal component".into(),
+        ));
+    }
     // Reject any path containing parent-directory components
     for component in resource_path.components() {
         if matches!(component, std::path::Component::ParentDir) {
@@ -117,7 +122,7 @@ fn rgba_to_premultiplied_bgra(rgba: &[u8]) -> Vec<u8> {
         bgra.push(((b as u16 * alpha) / 255) as u8); // B
         bgra.push(((g as u16 * alpha) / 255) as u8); // G
         bgra.push(((r as u16 * alpha) / 255) as u8); // R
-        bgra.push(a);                                  // A
+        bgra.push(a); // A
     }
     bgra
 }
@@ -331,10 +336,7 @@ impl PetProvider for CodexPetProvider {
 /// 1. `spritesheet.webp`
 /// 2. `spritesheet.png`
 /// 3. Any `.webp` or `.png` file in the directory
-fn resolve_spritesheet(
-    pet_dir: &Path,
-    manifest_path: Option<&str>,
-) -> Result<PathBuf, AppError> {
+fn resolve_spritesheet(pet_dir: &Path, manifest_path: Option<&str>) -> Result<PathBuf, AppError> {
     if let Some(resource) = manifest_path.filter(|path| !path.is_empty()) {
         let path = validate_resource_path(pet_dir, Path::new(resource))?;
         if path.is_file() {
@@ -437,7 +439,10 @@ mod tests {
         assert_eq!(manifest.display_name, Some("Test Cat".to_string()));
         assert_eq!(manifest.description, Some("A test pet".to_string()));
         assert_eq!(manifest.sprite_version_number, 2);
-        assert_eq!(manifest.spritesheet_path, Some("spritesheet.webp".to_string()));
+        assert_eq!(
+            manifest.spritesheet_path,
+            Some("spritesheet.webp".to_string())
+        );
     }
 
     #[test]

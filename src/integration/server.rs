@@ -279,24 +279,9 @@ fn write_json_response(stream: &mut TcpStream, status: u16, message: &str) -> st
 }
 
 fn generate_token() -> Result<String, std::io::Error> {
-    use windows_sys::Win32::Security::Cryptography::{
-        BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
-    };
-
     let mut bytes = [0u8; 32];
-    let status = unsafe {
-        BCryptGenRandom(
-            std::ptr::null_mut(),
-            bytes.as_mut_ptr(),
-            bytes.len() as u32,
-            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
-        )
-    };
-    if status < 0 {
-        return Err(std::io::Error::other(format!(
-            "BCryptGenRandom failed with NTSTATUS {status}"
-        )));
-    }
+    getrandom::fill(&mut bytes)
+        .map_err(|error| std::io::Error::other(format!("secure random failed: {error}")))?;
 
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }

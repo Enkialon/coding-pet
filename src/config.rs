@@ -24,11 +24,21 @@ pub struct Position {
     pub y: i32,
 }
 
-fn default_pet() -> String { String::new() }
-fn default_scale() -> f64 { 0.75 }
-fn default_true() -> bool { true }
-fn default_false() -> bool { false }
-fn default_lang() -> String { "auto".to_string() }
+fn default_pet() -> String {
+    String::new()
+}
+fn default_scale() -> f64 {
+    0.75
+}
+fn default_true() -> bool {
+    true
+}
+fn default_false() -> bool {
+    false
+}
+fn default_lang() -> String {
+    "auto".to_string()
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -60,7 +70,9 @@ impl Config {
     }
 
     pub fn save(&self) {
-        let Some(path) = Self::config_path() else { return };
+        let Some(path) = Self::config_path() else {
+            return;
+        };
         if let Some(parent) = path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 tracing::warn!("Failed to create config dir: {e}");

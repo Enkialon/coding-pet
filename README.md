@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-A lightweight Windows-native desktop pet powered by pure Rust.
+A lightweight native desktop pet for Windows and macOS, powered by Rust.
 
 CodingPet is an extremely lightweight programmer's desktop pet. It uses the Codex v2 custom-pet asset contract and a provider-neutral local event protocol, displaying coding activity directly on your desktop with near-zero idle resource usage.
 
@@ -16,8 +16,8 @@ CodingPet is an extremely lightweight programmer's desktop pet. It uses the Code
 - Per-monitor DPI aware
 - Loads Codex v2 pet spritesheets (1536×2288, 8×11 grid, PNG/WebP)
 - Reads legacy Codex v1 8×9 pets during migration
-- Auto-discovers pets from `%USERPROFILE%\.codex\pets\`
-- System tray with show/hide/exit
+- Auto-discovers pets from `~/.codex/pets/`
+- Windows system tray or macOS menu-bar icon with show/hide/exit
 - Right-click context menu (play animations, select pet)
 - Random ambient animations (wave/jump)
 - Configuration persistence
@@ -26,20 +26,27 @@ CodingPet is an extremely lightweight programmer's desktop pet. It uses the Code
 
 ## Build
 
-Requires Rust (stable toolchain, Windows target).
+Requires the stable Rust toolchain on Windows or macOS.
 
 ```bash
 cargo build --release
 ```
 
-Output: `target/release/coding-pet.exe` (single executable, no runtime dependencies)
+Output:
+
+- Windows: `target/release/coding-pet.exe`
+- macOS: `target/release/coding-pet` (GitHub Releases provide a universal `.app` bundle)
 
 ## Run
 
-Double-click `coding-pet.exe` or run it from PowerShell:
+Double-click the downloaded application, or run the locally built executable:
 
 ```powershell
 .\target\release\coding-pet.exe
+```
+
+```bash
+./target/release/coding-pet
 ```
 
 For debug logging:
@@ -65,10 +72,10 @@ the event catalog, HTTP contract, security model, and adapter rules.
 
 ## Codex Pet Import
 
-CodingPet automatically discovers pets from the Codex pets directory:
+CodingPet automatically discovers pets from the Codex pets directory in the current user's home:
 
 ```
-%USERPROFILE%\.codex\pets\
+~/.codex/pets/
 ```
 
 ### Directory Structure
@@ -169,17 +176,18 @@ Missing or corrupt configuration is automatically reset to defaults.
 |--------|--------|
 | Idle CPU | ≈ 0% (event-driven, no busy loop) |
 | Animating CPU | < 2% |
-| RSS Memory | < 30 MB (typical ~14 MB) |
+| RSS Memory | < 30 MB on the Windows GDI backend (typical ~14 MB) |
 | Startup | Instant (no splash, no network) |
 
 ## Architecture
 
 - Pure Rust, single-threaded
-- Win32 `UpdateLayeredWindow` for per-pixel alpha transparency
+- Platform-neutral animation, pet asset, hook, and configuration core
+- Windows backend: Win32 `UpdateLayeredWindow` per-pixel transparency
+- macOS backend: transparent AppKit window with an event-driven Metal surface
 - `winit` for event loop and input handling
-- `windows-sys` for zero-overhead Win32 FFI
 - Event-driven animation (only redraws on frame change)
-- No GPU, no web tech, no external runtime
+- No WebView or external runtime; Windows remains CPU/GDI-only
 - Codex v2 asset contract in the pet resource layer
 - Independent provider-neutral protocol in the coding-tool integration layer
 
@@ -192,7 +200,7 @@ Missing or corrupt configuration is automatically reset to defaults.
 
 ## Releasing
 
-Pushing a semantic version tag automatically runs the Windows release workflow, tests the project, builds the optimized executable, generates a SHA-256 checksum, and publishes both files to a GitHub Release.
+Pushing a semantic version tag automatically tests Windows and macOS, builds a Windows x86_64 executable and a universal macOS app, generates SHA-256 checksums, and publishes them to a GitHub Release.
 
 ```powershell
 # First update the version in Cargo.toml, then:
