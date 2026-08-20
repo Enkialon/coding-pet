@@ -12,6 +12,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
+use crate::config::{MAX_DISPLAY_SCALE, MIN_DISPLAY_SCALE};
 use crate::locale::Locale;
 
 #[derive(Clone, Copy)]
@@ -390,8 +391,11 @@ fn paint_ui(
                 ui.add_space(6.0);
                 ui.label(if zh { "宠物大小" } else { "Pet size" });
                 let scale = ui.add(
-                    egui::Slider::new(&mut values.display_scale, 0.5..=2.0)
-                        .custom_formatter(|n, _| format!("{:.0}%", n * 100.0)),
+                    egui::Slider::new(
+                        &mut values.display_scale,
+                        MIN_DISPLAY_SCALE as f32..=MAX_DISPLAY_SCALE as f32,
+                    )
+                    .custom_formatter(|n, _| format!("{:.0}%", n * 100.0)),
                 );
                 ui.small(if zh {
                     "只改变显示尺寸，不会改精灵图本身。"

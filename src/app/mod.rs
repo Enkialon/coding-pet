@@ -6,7 +6,7 @@
 use std::time::{Duration, Instant};
 
 use crate::animation::{AmbientTimer, Animator};
-use crate::config::Config;
+use crate::config::{Config, MAX_DISPLAY_SCALE, MIN_DISPLAY_SCALE};
 use crate::integration::{AppUserEvent, IntegrationServer};
 use crate::pet::codex::CodexPetProvider;
 use crate::pet::model::{Animation, PetAnimation, SpriteRect};
@@ -86,7 +86,9 @@ impl PetApp {
             pending_animation: None,
             loop_idle: config.loop_idle,
             look_range: config.look_range.clamp(80, 600) as i32,
-            display_scale: config.display_scale.clamp(0.5, 2.0),
+            display_scale: config
+                .display_scale
+                .clamp(MIN_DISPLAY_SCALE, MAX_DISPLAY_SCALE),
             pointer_poll_ms: Config::clamp_pointer_poll_ms(config.pointer_poll_ms),
             settings: None,
         }
@@ -523,7 +525,9 @@ impl PetApp {
     }
 
     fn output_size(&self) -> (u32, u32) {
-        let scale = self.display_scale.clamp(0.5, 2.0);
+        let scale = self
+            .display_scale
+            .clamp(MIN_DISPLAY_SCALE, MAX_DISPLAY_SCALE);
         (
             ((f64::from(WIN_WIDTH) * scale).round() as u32).max(1),
             ((f64::from(WIN_HEIGHT) * scale).round() as u32).max(1),
@@ -531,7 +535,7 @@ impl PetApp {
     }
 
     fn apply_display_scale(&mut self, scale: f64) {
-        self.display_scale = scale.clamp(0.5, 2.0);
+        self.display_scale = scale.clamp(MIN_DISPLAY_SCALE, MAX_DISPLAY_SCALE);
         let (width, height) = self.output_size();
         if let Some(win) = &self.window {
             let _ = win

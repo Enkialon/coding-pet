@@ -53,6 +53,8 @@ fn default_display_scale() -> f64 {
 }
 pub const MIN_POINTER_POLL_MS: u64 = 16;
 pub const MAX_POINTER_POLL_MS: u64 = 200;
+pub const MIN_DISPLAY_SCALE: f64 = 0.5;
+pub const MAX_DISPLAY_SCALE: f64 = 1.5;
 fn default_pointer_poll_ms() -> u64 {
     50
 }
