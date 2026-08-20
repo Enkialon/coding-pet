@@ -42,7 +42,8 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
             PetWindow::primary_monitor_center(event_loop)
         };
 
-        let win = match PetWindow::new(event_loop, WIN_WIDTH, WIN_HEIGHT, pos_x, pos_y) {
+        let (out_w, out_h) = self.output_size();
+        let win = match PetWindow::new(event_loop, out_w, out_h, pos_x, pos_y) {
             Ok(w) => w,
             Err(e) => {
                 tracing::error!("Failed to create window: {e}");
@@ -51,7 +52,14 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
             }
         };
 
-        let mut renderer = match Renderer::new(&win, WIN_WIDTH, WIN_HEIGHT) {
+        // Windows draws into an on-screen DIB, so the buffer is the scaled
+        // window. macOS keeps a 192×208 buffer and lets the surface scale it.
+        let (buffer_w, buffer_h) = if cfg!(target_os = "macos") {
+            (WIN_WIDTH, WIN_HEIGHT)
+        } else {
+            (out_w, out_h)
+        };
+        let mut renderer = match Renderer::new(&win, buffer_w, buffer_h) {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("Failed to create renderer: {e}");
@@ -99,9 +107,6 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
         tracing::info!("Window and renderer initialised — animation started ({source})");
         self.window = Some(win);
         self.renderer = Some(renderer);
-        if (self.display_scale - 1.0).abs() > f64::EPSILON {
-            self.apply_display_scale(self.display_scale);
-        }
     }
 
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {

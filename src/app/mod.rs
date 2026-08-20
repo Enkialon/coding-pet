@@ -522,10 +522,17 @@ impl PetApp {
         config.save();
     }
 
+    fn output_size(&self) -> (u32, u32) {
+        let scale = self.display_scale.clamp(0.5, 2.0);
+        (
+            ((f64::from(WIN_WIDTH) * scale).round() as u32).max(1),
+            ((f64::from(WIN_HEIGHT) * scale).round() as u32).max(1),
+        )
+    }
+
     fn apply_display_scale(&mut self, scale: f64) {
         self.display_scale = scale.clamp(0.5, 2.0);
-        let width = ((f64::from(WIN_WIDTH) * self.display_scale).round() as u32).max(1);
-        let height = ((f64::from(WIN_HEIGHT) * self.display_scale).round() as u32).max(1);
+        let (width, height) = self.output_size();
         if let Some(win) = &self.window {
             let _ = win
                 .window
@@ -593,7 +600,8 @@ impl PetApp {
         }
         if let Some(loop_idle) = patch.loop_idle {
             self.loop_idle = loop_idle;
-            if self.base_animation == PetAnimation::Idle && !self.pointer.is_held() && !self.looking {
+            if self.base_animation == PetAnimation::Idle && !self.pointer.is_held() && !self.looking
+            {
                 self.restore_idle();
             }
         }
