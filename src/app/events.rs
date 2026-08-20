@@ -124,7 +124,7 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
             }
 
             // Check ambient timer: trigger random one-shot animation when idle
-            if self.visible && !self.dragging && !self.looking {
+            if self.visible && !self.pointer.is_held() && !self.looking {
                 if let Some(anim) = self.ambient_timer.check(now) {
                     // Only trigger if currently in Idle animation
                     if self.animator.current_animation() == PetAnimation::Idle {
@@ -187,23 +187,21 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                     .unwrap_or(winit::dpi::PhysicalSize::new(WIN_WIDTH, WIN_HEIGHT));
                 (self.cursor_x, self.cursor_y) =
                     normalize_cursor_position(position.x, position.y, size.width, size.height);
-                if self.dragging {
-                    self.follow_drag_cursor();
-                }
+                self.sync_pointer_gesture();
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
             } => {
-                self.begin_software_drag();
+                self.begin_pointer_press();
             }
             WindowEvent::MouseInput {
                 state: ElementState::Released,
                 button: MouseButton::Left,
                 ..
             } => {
-                self.end_software_drag();
+                self.end_pointer_gesture();
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
@@ -233,7 +231,7 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
                     session_id = event.session_id.as_deref().unwrap_or(""),
                     "Received coding-tool event"
                 );
-                let interacting = self.dragging || self.looking;
+                let interacting = self.pointer.is_held() || self.looking;
                 let animation = match event.kind() {
                     // Idle returns to the configured idle mode (loop or freeze).
                     AgentEventKind::Idle => {
@@ -290,12 +288,15 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
         } else {
             None
         };
-        let ambient_time =
-            if self.ambient_timer.is_enabled() && self.visible && !self.dragging && !self.looking {
-                Some(self.ambient_timer.next_trigger_time())
-            } else {
-                None
-            };
+        let ambient_time = if self.ambient_timer.is_enabled()
+            && self.visible
+            && !self.pointer.is_held()
+            && !self.looking
+        {
+            Some(self.ambient_timer.next_trigger_time())
+        } else {
+            None
+        };
         let pointer_time = if self.visible {
             Some(self.next_pointer_poll)
         } else {

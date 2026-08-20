@@ -25,6 +25,9 @@ pub struct Config {
     /// unused `scale` values (0.75) do not shrink the pet.
     #[serde(default = "default_display_scale")]
     pub display_scale: f64,
+    /// How often to poll the global cursor for the awareness ring, in milliseconds.
+    #[serde(default = "default_pointer_poll_ms")]
+    pub pointer_poll_ms: u64,
     /// Language setting: "auto" (system default), "zh", or "en".
     #[serde(default = "default_lang")]
     pub language: String,
@@ -48,6 +51,11 @@ fn default_look_range() -> u32 {
 fn default_display_scale() -> f64 {
     1.0
 }
+pub const MIN_POINTER_POLL_MS: u64 = 16;
+pub const MAX_POINTER_POLL_MS: u64 = 200;
+fn default_pointer_poll_ms() -> u64 {
+    50
+}
 fn default_true() -> bool {
     true
 }
@@ -69,12 +77,17 @@ impl Default for Config {
             loop_idle: true,
             look_range: default_look_range(),
             display_scale: default_display_scale(),
+            pointer_poll_ms: default_pointer_poll_ms(),
             language: default_lang(),
         }
     }
 }
 
 impl Config {
+    pub fn clamp_pointer_poll_ms(ms: u64) -> u64 {
+        ms.clamp(MIN_POINTER_POLL_MS, MAX_POINTER_POLL_MS)
+    }
+
     pub fn config_path() -> Option<PathBuf> {
         directories::ProjectDirs::from("", "", "CodingPet")
             .map(|dirs| dirs.config_dir().join("config.json"))
@@ -124,6 +137,7 @@ mod tests {
         assert!(config.loop_idle);
         assert_eq!(config.look_range, 240);
         assert_eq!(config.display_scale, 1.0);
+        assert_eq!(config.pointer_poll_ms, 50);
     }
 
     #[test]
@@ -137,6 +151,7 @@ mod tests {
             loop_idle: true,
             look_range: 240,
             display_scale: 1.0,
+            pointer_poll_ms: 50,
             language: "auto".to_string(),
         };
         let json = serde_json::to_string(&config).unwrap();
@@ -161,5 +176,13 @@ mod tests {
         assert!(config.loop_idle);
         assert_eq!(config.look_range, 240);
         assert_eq!(config.display_scale, 1.0);
+        assert_eq!(config.pointer_poll_ms, 50);
+    }
+
+    #[test]
+    fn test_pointer_poll_ms_is_clamped() {
+        assert_eq!(Config::clamp_pointer_poll_ms(1), MIN_POINTER_POLL_MS);
+        assert_eq!(Config::clamp_pointer_poll_ms(50), 50);
+        assert_eq!(Config::clamp_pointer_poll_ms(1000), MAX_POINTER_POLL_MS);
     }
 }

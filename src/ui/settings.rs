@@ -18,6 +18,7 @@ use crate::locale::Locale;
 pub struct SettingsValues {
     pub display_scale: f32,
     pub look_range: u32,
+    pub pointer_poll_ms: u64,
     pub loop_idle: bool,
     pub idle_animation: bool,
     pub always_on_top: bool,
@@ -27,6 +28,7 @@ pub struct SettingsValues {
 pub struct SettingsPatch {
     pub display_scale: Option<f64>,
     pub look_range: Option<u32>,
+    pub pointer_poll_ms: Option<u64>,
     pub loop_idle: Option<bool>,
     pub idle_animation: Option<bool>,
     pub always_on_top: Option<bool>,
@@ -69,7 +71,7 @@ impl SettingsWindow {
         } else {
             "CodingPet Settings"
         };
-        let inner = LogicalSize::new(440.0, 500.0);
+        let inner = LogicalSize::new(440.0, 580.0);
         let estimated = estimated_outer_size(event_loop, anchor, inner);
         let (x, y) = centered_position(event_loop, anchor, estimated.0, estimated.1);
         let window = Arc::new(
@@ -420,6 +422,31 @@ fn paint_ui(
                     patch.look_range = Some(values.look_range);
                 }
                 if range.drag_stopped() {
+                    patch.save = true;
+                }
+
+                ui.add_space(10.0);
+                ui.label(if zh {
+                    "感应刷新间隔"
+                } else {
+                    "Awareness poll interval"
+                });
+                let poll = ui.add(
+                    egui::Slider::new(
+                        &mut values.pointer_poll_ms,
+                        crate::config::MIN_POINTER_POLL_MS..=crate::config::MAX_POINTER_POLL_MS,
+                    )
+                    .suffix(" ms"),
+                );
+                ui.small(if zh {
+                    "越低越跟手，越高轮询越少。"
+                } else {
+                    "Lower is snappier; higher polls less often."
+                });
+                if poll.changed() {
+                    patch.pointer_poll_ms = Some(values.pointer_poll_ms);
+                }
+                if poll.drag_stopped() {
                     patch.save = true;
                 }
             });

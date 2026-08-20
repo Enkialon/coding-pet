@@ -63,6 +63,14 @@ pub(super) fn stabilized_look_direction_index(
     Some(quantize_look_angle(angle, current))
 }
 
+/// True once the cursor has moved far enough from the press point to count as a drag.
+pub(super) fn pointer_drag_started(press: (i32, i32), current: (i32, i32), threshold: i32) -> bool {
+    let dx = i64::from(current.0 - press.0);
+    let dy = i64::from(current.1 - press.1);
+    let limit = i64::from(threshold);
+    dx * dx + dy * dy >= limit * limit
+}
+
 pub(super) fn normalize_cursor_position(
     x: f64,
     y: f64,
@@ -172,5 +180,12 @@ mod tests {
             classify_pointer_zone((200, 350), origin, size, 240),
             PointerZone::Far
         );
+    }
+
+    #[test]
+    fn click_stays_pressed_until_the_cursor_leaves_the_slop() {
+        assert!(!pointer_drag_started((100, 100), (104, 103), 8));
+        assert!(pointer_drag_started((100, 100), (108, 100), 8));
+        assert!(pointer_drag_started((100, 100), (100, 108), 8));
     }
 }

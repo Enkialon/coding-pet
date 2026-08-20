@@ -18,9 +18,10 @@ mod interaction;
 mod state;
 
 use interaction::{
-    classify_pointer_zone, normalize_cursor_position, stabilized_look_direction_index, PointerZone,
+    classify_pointer_zone, normalize_cursor_position, pointer_drag_started,
+    stabilized_look_direction_index, PointerZone,
 };
-use state::PetApp;
+use state::{PetApp, PointerGesture};
 
 /// Default window size for the desktop pet.
 const WIN_WIDTH: u32 = 192;
@@ -34,7 +35,6 @@ const TEST_FRAME_MS: u64 = 150;
 
 /// Polling is only used for the small awareness ring around the pet. It avoids
 /// global mouse hooks while remaining light enough for an idle desktop app.
-const POINTER_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const LOOK_ENTER_MARGIN: i32 = 240;
 const LOOK_EXIT_MARGIN: i32 = 300;
 /// Explicit menu actions must remain visible long enough to complete instead
@@ -77,18 +77,17 @@ impl PetApp {
             visible: true,
             cursor_x: 0,
             cursor_y: 0,
-            dragging: false,
+            pointer: PointerGesture::Idle,
             looking: false,
             current_look_direction: None,
             next_pointer_poll: Instant::now(),
             pointer_look_suppressed_until: None,
-            last_drag_window_x: None,
-            drag_cursor_offset: None,
             base_animation: PetAnimation::Idle,
             pending_animation: None,
             loop_idle: config.loop_idle,
             look_range: config.look_range.clamp(80, 600) as i32,
             display_scale: config.display_scale.clamp(0.5, 2.0),
+            pointer_poll_ms: Config::clamp_pointer_poll_ms(config.pointer_poll_ms),
             settings: None,
         }
     }
@@ -231,7 +230,7 @@ impl PetApp {
     }
 
     fn update_look_pose(&mut self) {
-        if self.dragging {
+        if self.pointer.is_held() {
             return;
         }
 
@@ -264,12 +263,12 @@ impl PetApp {
         if now < self.next_pointer_poll {
             return;
         }
-        self.next_pointer_poll = now + POINTER_POLL_INTERVAL;
+        self.next_pointer_poll = now + Duration::from_millis(self.pointer_poll_ms);
         if !self.visible {
             return;
         }
-        if self.dragging {
-            self.follow_drag_cursor();
+        self.sync_pointer_gesture();
+        if self.pointer.is_held() {
             return;
         }
         if self
@@ -317,7 +316,7 @@ impl PetApp {
         }
     }
 
-    fn begin_software_drag(&mut self) {
+    fn begin_pointer_press(&mut self) {
         let Some((origin, scale_factor)) = self
             .window
             .as_ref()
@@ -327,23 +326,47 @@ impl PetApp {
         };
         let cursor = platform::global_cursor_position(scale_factor)
             .unwrap_or((origin.0 + self.cursor_x, origin.1 + self.cursor_y));
+        self.pointer = PointerGesture::Pressed {
+            cursor,
+            offset: (cursor.0 - origin.0, cursor.1 - origin.1),
+            window_x: origin.0,
+        };
+    }
 
-        self.dragging = true;
+    fn sync_pointer_gesture(&mut self) {
+        match self.pointer {
+            PointerGesture::Idle => {}
+            PointerGesture::Pressed {
+                cursor,
+                offset,
+                window_x,
+            } => {
+                let Some(scale_factor) = self.window.as_ref().map(|win| win.scale_factor()) else {
+                    return;
+                };
+                let Some(now) = platform::global_cursor_position(scale_factor) else {
+                    return;
+                };
+                if pointer_drag_started(cursor, now, DRAG_DIRECTION_THRESHOLD) {
+                    self.commit_software_drag(offset, window_x);
+                    self.apply_drag_cursor(now);
+                }
+            }
+            PointerGesture::Dragging { .. } => self.follow_drag_cursor(),
+        }
+    }
+
+    fn commit_software_drag(&mut self, offset: (i32, i32), window_x: i32) {
         self.looking = false;
         self.current_look_direction = None;
-        self.last_drag_window_x = Some(origin.0);
-        self.drag_cursor_offset = Some((cursor.0 - origin.0, cursor.1 - origin.1));
-
-        let initial_animation = if self.cursor_x >= WIN_WIDTH as i32 / 2 {
-            PetAnimation::RunningRight
-        } else {
-            PetAnimation::RunningLeft
+        self.pointer = PointerGesture::Dragging {
+            last_window_x: window_x,
+            offset,
         };
-        self.play_drag_animation(initial_animation);
     }
 
     fn follow_drag_cursor(&mut self) {
-        if !self.dragging {
+        if !self.pointer.is_dragging() {
             return;
         }
         let Some(scale_factor) = self.window.as_ref().map(|win| win.scale_factor()) else {
@@ -356,7 +379,7 @@ impl PetApp {
     }
 
     fn apply_drag_cursor(&mut self, cursor: (i32, i32)) {
-        let Some(offset) = self.drag_cursor_offset else {
+        let PointerGesture::Dragging { offset, .. } = self.pointer else {
             return;
         };
         let new_x = cursor.0 - offset.0;
@@ -378,52 +401,63 @@ impl PetApp {
     }
 
     fn update_drag_direction(&mut self, window_x: i32) {
-        let Some(anchor_x) = self.last_drag_window_x else {
-            self.last_drag_window_x = Some(window_x);
+        let PointerGesture::Dragging {
+            last_window_x: anchor_x,
+            ..
+        } = self.pointer
+        else {
             return;
         };
         let delta_x = window_x - anchor_x;
         match self.animator.current_animation() {
             PetAnimation::RunningRight => {
                 if window_x > anchor_x {
-                    self.last_drag_window_x = Some(window_x);
+                    self.pointer.set_last_window_x(window_x);
                 } else if delta_x <= -DRAG_DIRECTION_REVERSAL_THRESHOLD {
-                    self.last_drag_window_x = Some(window_x);
+                    self.pointer.set_last_window_x(window_x);
                     self.play_drag_animation(PetAnimation::RunningLeft);
                 }
             }
             PetAnimation::RunningLeft => {
                 if window_x < anchor_x {
-                    self.last_drag_window_x = Some(window_x);
+                    self.pointer.set_last_window_x(window_x);
                 } else if delta_x >= DRAG_DIRECTION_REVERSAL_THRESHOLD {
-                    self.last_drag_window_x = Some(window_x);
+                    self.pointer.set_last_window_x(window_x);
                     self.play_drag_animation(PetAnimation::RunningRight);
                 }
             }
             _ if delta_x >= DRAG_DIRECTION_THRESHOLD => {
-                self.last_drag_window_x = Some(window_x);
+                self.pointer.set_last_window_x(window_x);
                 self.play_drag_animation(PetAnimation::RunningRight);
             }
             _ if delta_x <= -DRAG_DIRECTION_THRESHOLD => {
-                self.last_drag_window_x = Some(window_x);
+                self.pointer.set_last_window_x(window_x);
                 self.play_drag_animation(PetAnimation::RunningLeft);
             }
             _ => {}
         }
     }
 
-    fn end_software_drag(&mut self) {
-        if !self.dragging {
-            return;
-        }
-        self.dragging = false;
-        self.last_drag_window_x = None;
-        self.drag_cursor_offset = None;
-        self.save_config();
-        if !self.looking {
-            self.restore_base_animation();
+    fn end_pointer_gesture(&mut self) {
+        match self.pointer {
+            PointerGesture::Idle => {}
+            PointerGesture::Pressed { .. } => {
+                self.pointer = PointerGesture::Idle;
+                self.on_pet_click();
+            }
+            PointerGesture::Dragging { .. } => {
+                self.pointer = PointerGesture::Idle;
+                self.save_config();
+                if !self.looking {
+                    self.restore_base_animation();
+                }
+            }
         }
     }
+
+    /// Reserved for a future Codex tap animation. Clicks currently do nothing.
+    #[allow(clippy::unused_self)]
+    fn on_pet_click(&mut self) {}
 
     /// Build a list of `(display_name, pet_id)` from discovered pet directories.
     fn discover_pet_names() -> Vec<(String, String)> {
@@ -484,6 +518,7 @@ impl PetApp {
         config.loop_idle = self.loop_idle;
         config.look_range = self.look_range.max(0) as u32;
         config.display_scale = self.display_scale;
+        config.pointer_poll_ms = self.pointer_poll_ms;
         config.save();
     }
 
@@ -511,6 +546,7 @@ impl PetApp {
         let values = crate::ui::settings::SettingsValues {
             display_scale: self.display_scale as f32,
             look_range: self.look_range.max(0) as u32,
+            pointer_poll_ms: self.pointer_poll_ms,
             loop_idle: self.loop_idle,
             idle_animation: self.ambient_timer.is_enabled(),
             always_on_top: self.tray.as_ref().is_some_and(|t| t.always_on_top),
@@ -552,9 +588,12 @@ impl PetApp {
         if let Some(range) = patch.look_range {
             self.look_range = range.clamp(80, 600) as i32;
         }
+        if let Some(ms) = patch.pointer_poll_ms {
+            self.pointer_poll_ms = Config::clamp_pointer_poll_ms(ms);
+        }
         if let Some(loop_idle) = patch.loop_idle {
             self.loop_idle = loop_idle;
-            if self.base_animation == PetAnimation::Idle && !self.dragging && !self.looking {
+            if self.base_animation == PetAnimation::Idle && !self.pointer.is_held() && !self.looking {
                 self.restore_idle();
             }
         }

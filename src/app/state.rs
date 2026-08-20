@@ -19,14 +19,11 @@ pub(super) struct PetApp {
     pub(super) visible: bool,
     pub(super) cursor_x: i32,
     pub(super) cursor_y: i32,
-    pub(super) dragging: bool,
+    pub(super) pointer: PointerGesture,
     pub(super) looking: bool,
     pub(super) current_look_direction: Option<u8>,
     pub(super) next_pointer_poll: Instant,
     pub(super) pointer_look_suppressed_until: Option<Instant>,
-    pub(super) last_drag_window_x: Option<i32>,
-    /// Cursor offset from the window origin while a software drag is active.
-    pub(super) drag_cursor_offset: Option<(i32, i32)>,
     pub(super) base_animation: PetAnimation,
     pub(super) pending_animation: Option<PetAnimation>,
     /// Whether idle should loop. Owned here so a future settings page can
@@ -34,5 +31,40 @@ pub(super) struct PetApp {
     pub(super) loop_idle: bool,
     pub(super) look_range: i32,
     pub(super) display_scale: f64,
+    /// How often to sample the global cursor for the awareness ring.
+    pub(super) pointer_poll_ms: u64,
     pub(super) settings: Option<SettingsWindow>,
+}
+
+/// Left-button gesture parsed from the raw winit pointer stream.
+/// Press is not a drag; drag starts only after the cursor moves far enough.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PointerGesture {
+    Idle,
+    Pressed {
+        cursor: (i32, i32),
+        offset: (i32, i32),
+        window_x: i32,
+    },
+    Dragging {
+        last_window_x: i32,
+        offset: (i32, i32),
+    },
+}
+
+impl PointerGesture {
+    pub(super) fn is_dragging(self) -> bool {
+        matches!(self, Self::Dragging { .. })
+    }
+
+    /// Pressed or dragging: the button is down, so Look/ambient should wait.
+    pub(super) fn is_held(self) -> bool {
+        !matches!(self, Self::Idle)
+    }
+
+    pub(super) fn set_last_window_x(&mut self, x: i32) {
+        if let Self::Dragging { last_window_x, .. } = self {
+            *last_window_x = x;
+        }
+    }
 }
