@@ -235,10 +235,14 @@ impl SettingsWindow {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 self.surface.configure(&self.device, &self.surface_config);
+                // configure 只修复了 surface，事件驱动下不会再有 RedrawRequested，
+                // 必须主动请求重绘，否则窗口停留在空白帧。
+                self.window.request_redraw();
                 return patch;
             }
             Err(error) => {
                 tracing::warn!("settings surface: {error}");
+                self.window.request_redraw();
                 return patch;
             }
         };
