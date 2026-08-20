@@ -34,6 +34,11 @@ pub(super) struct PetApp {
     /// How often to sample the global cursor for the awareness ring.
     pub(super) pointer_poll_ms: u64,
     pub(super) settings: Option<SettingsWindow>,
+    /// Snapshot of startup-only config fields taken in `PetApp::new`, so
+    /// `resumed()` and the settings window never re-read the config file.
+    pub(super) initial_position: (i32, i32),
+    pub(super) initial_always_on_top: bool,
+    pub(super) config_language: String,
 }
 
 /// Left-button gesture parsed from the raw winit pointer stream.

@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use crate::config::Config;
 use crate::integration::{AgentEventKind, AppUserEvent};
 use crate::locale::Locale;
 use crate::pet::model::PetAnimation;
@@ -19,21 +18,17 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
             return; // already initialised
         }
 
-        // Determine initial window position: config or default centre
-        let config = Config::load();
-        let (pos_x, pos_y) = if config.position.x != 0 || config.position.y != 0 {
+        // Determine initial window position: config snapshot or default centre
+        let (config_x, config_y) = self.initial_position;
+        let (pos_x, pos_y) = if config_x != 0 || config_y != 0 {
             // Validate saved position is still on a monitor
-            if PetWindow::is_position_on_any_monitor(
-                config.position.x,
-                config.position.y,
-                event_loop,
-            ) {
-                (config.position.x, config.position.y)
+            if PetWindow::is_position_on_any_monitor(config_x, config_y, event_loop) {
+                (config_x, config_y)
             } else {
                 tracing::warn!(
                     "Saved position ({}, {}) is off-screen — using monitor centre",
-                    config.position.x,
-                    config.position.y
+                    config_x,
+                    config_y
                 );
                 PetWindow::primary_monitor_center(event_loop)
             }
@@ -80,17 +75,17 @@ impl ApplicationHandler<AppUserEvent> for PetApp {
         let (pixels, stride) = self.active_spritesheet();
         renderer.draw_frame(pixels, stride, rect);
 
-        // Apply always_on_top from config on startup
-        if !config.always_on_top {
+        // Apply always_on_top from the startup config snapshot
+        if !self.initial_always_on_top {
             win.set_always_on_top(false);
         }
 
         // Create the system tray
         let pet_names = Self::discover_pet_names();
-        let locale = Locale::detect(&config.language);
+        let locale = Locale::detect(&self.config_language);
         match PetTray::new(&pet_names, locale) {
             Ok(mut tray) => {
-                tray.set_always_on_top_text(config.always_on_top);
+                tray.set_always_on_top_text(self.initial_always_on_top);
                 tracing::info!("System tray created with {} pet(s)", pet_names.len());
                 self.tray = Some(tray);
             }

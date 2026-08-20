@@ -91,6 +91,9 @@ impl PetApp {
                 .clamp(MIN_DISPLAY_SCALE, MAX_DISPLAY_SCALE),
             pointer_poll_ms: Config::clamp_pointer_poll_ms(config.pointer_poll_ms),
             settings: None,
+            initial_position: (config.position.x, config.position.y),
+            initial_always_on_top: config.always_on_top,
+            config_language: config.language.clone(),
         }
     }
 
@@ -553,7 +556,7 @@ impl PetApp {
             settings.focus();
             return;
         }
-        let locale = crate::locale::Locale::detect(&Config::load().language);
+        let locale = crate::locale::Locale::detect(&self.config_language);
         let values = crate::ui::settings::SettingsValues {
             display_scale: self.display_scale as f32,
             look_range: self.look_range.max(0) as u32,
