@@ -1,9 +1,10 @@
 // Animation engine — Phase 3
 // State machine that drives sprite animation with precise frame timing.
 
+use std::cell::Cell;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::pet::model::{Animation, PetAnimation, SpriteRect};
+use crate::pet::model::{Animation, PetAnimation, SpriteRect, PET_FRAME_HEIGHT, PET_FRAME_WIDTH};
 
 pub struct Animator {
     current: PetAnimation,
@@ -15,6 +16,9 @@ pub struct Animator {
     last_advance: Instant,
     playing: bool,
     finished: bool,
+    /// Guards a one-time warning when `current_rect` falls back, so
+    /// per-redraw calls do not flood the log.
+    warned_bad_frame: Cell<bool>,
 }
 
 impl Animator {
@@ -30,6 +34,7 @@ impl Animator {
             last_advance: Instant::now(),
             playing: false,
             finished: false,
+            warned_bad_frame: Cell::new(false),
         }
     }
 
@@ -45,6 +50,7 @@ impl Animator {
         self.looping = animation_data.looping;
         self.playing = true;
         self.finished = false;
+        self.warned_bad_frame.set(false);
         self.last_advance = Instant::now();
     }
 
@@ -76,9 +82,27 @@ impl Animator {
         }
     }
 
-    /// The sprite rect for the current frame.
+    /// The sprite rect for the current frame. Falls back to a full-window
+    /// rect instead of panicking when the frame index is out of range.
     pub fn current_rect(&self) -> SpriteRect {
-        self.frames[self.frame_index]
+        match self.frames.get(self.frame_index) {
+            Some(rect) => *rect,
+            None => {
+                if !self.warned_bad_frame.replace(true) {
+                    tracing::warn!(
+                        "Frame index {} out of range for {} frames; falling back to full rect",
+                        self.frame_index,
+                        self.frames.len()
+                    );
+                }
+                SpriteRect {
+                    x: 0,
+                    y: 0,
+                    width: PET_FRAME_WIDTH,
+                    height: PET_FRAME_HEIGHT,
+                }
+            }
+        }
     }
 
     /// When the next frame should be displayed.
@@ -198,16 +222,18 @@ impl AmbientTimer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pet::model::{Animation, PetAnimation, SpriteRect};
+    use crate::pet::model::{
+        Animation, PetAnimation, SpriteRect, PET_FRAME_HEIGHT, PET_FRAME_WIDTH,
+    };
 
     fn test_animation(frames: usize, duration_ms: u64, looping: bool) -> Animation {
         Animation {
             frames: (0..frames)
                 .map(|i| SpriteRect {
-                    x: i as u32 * 192,
+                    x: i as u32 * PET_FRAME_WIDTH,
                     y: 0,
-                    width: 192,
-                    height: 208,
+                    width: PET_FRAME_WIDTH,
+                    height: PET_FRAME_HEIGHT,
                 })
                 .collect(),
             frame_durations_ms: vec![duration_ms; frames],
@@ -228,7 +254,7 @@ mod tests {
         // Advance past one frame duration
         let changed = animator.tick(start + Duration::from_millis(101));
         assert!(changed);
-        assert_eq!(animator.current_rect().x, 192);
+        assert_eq!(animator.current_rect().x, PET_FRAME_WIDTH);
     }
 
     #[test]
@@ -260,7 +286,7 @@ mod tests {
 
         assert!(animator.is_finished());
         // Should stay at last frame (index 2)
-        assert_eq!(animator.current_rect().x, 384);
+        assert_eq!(animator.current_rect().x, PET_FRAME_WIDTH * 2);
     }
 
     #[test]
@@ -272,7 +298,7 @@ mod tests {
 
         let start = Instant::now();
         assert!(animator.tick(start + Duration::from_millis(101)));
-        assert_eq!(animator.current_rect().x, 192);
+        assert_eq!(animator.current_rect().x, PET_FRAME_WIDTH);
         assert!(!animator.tick(start + Duration::from_millis(250)));
         assert!(animator.tick(start + Duration::from_millis(402)));
         assert_eq!(animator.current_rect().x, 0);
@@ -295,7 +321,7 @@ mod tests {
         let mut animator = Animator::new();
         animator.set_animation(PetAnimation::Running, &animation);
         assert!(animator.tick(Instant::now() + Duration::from_millis(20)));
-        assert_eq!(animator.current_rect().x, 192);
+        assert_eq!(animator.current_rect().x, PET_FRAME_WIDTH);
 
         animator.set_animation(PetAnimation::Running, &animation);
         assert_eq!(animator.current_rect().x, 0);
@@ -314,5 +340,15 @@ mod tests {
         assert!(!animator.tick(start + Duration::from_millis(40)));
         assert!(animator.is_finished());
         assert!(!animator.is_playing());
+    }
+
+    #[test]
+    fn current_rect_without_frames_falls_back_instead_of_panicking() {
+        let animator = Animator::new();
+        let rect = animator.current_rect();
+        assert_eq!(rect.x, 0);
+        assert_eq!(rect.y, 0);
+        assert_eq!(rect.width, PET_FRAME_WIDTH);
+        assert_eq!(rect.height, PET_FRAME_HEIGHT);
     }
 }
