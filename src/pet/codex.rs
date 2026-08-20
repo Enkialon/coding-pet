@@ -4,7 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
-use super::model::{Animation, PetAnimation, PetMetadata, SpriteRect};
+use super::model::{
+    Animation, PetAnimation, PetMetadata, SpriteRect, PET_FRAME_HEIGHT, PET_FRAME_WIDTH,
+};
 use super::PetProvider;
 use crate::error::AppError;
 
@@ -15,11 +17,9 @@ use crate::error::AppError;
 const CODEX_COLUMNS: u32 = 8;
 const CODEX_V1_ROWS: u32 = 9;
 const CODEX_V2_ROWS: u32 = 11;
-const CODEX_CELL_WIDTH: u32 = 192;
-const CODEX_CELL_HEIGHT: u32 = 208;
-const CODEX_SHEET_WIDTH: u32 = CODEX_COLUMNS * CODEX_CELL_WIDTH; // 1536
-const CODEX_V1_SHEET_HEIGHT: u32 = CODEX_V1_ROWS * CODEX_CELL_HEIGHT; // 1872
-const CODEX_V2_SHEET_HEIGHT: u32 = CODEX_V2_ROWS * CODEX_CELL_HEIGHT; // 2288
+const CODEX_SHEET_WIDTH: u32 = CODEX_COLUMNS * PET_FRAME_WIDTH; // 1536
+const CODEX_V1_SHEET_HEIGHT: u32 = CODEX_V1_ROWS * PET_FRAME_HEIGHT; // 1872
+const CODEX_V2_SHEET_HEIGHT: u32 = CODEX_V2_ROWS * PET_FRAME_HEIGHT; // 2288
 
 // ---------------------------------------------------------------------------
 // Animation row mapping
@@ -70,10 +70,10 @@ fn build_animation(anim: PetAnimation, sprite_version: u32) -> Option<Animation>
 /// Compute the sprite rectangle for a given row and column in the spritesheet atlas.
 fn compute_sprite_rect(row: u32, col: u32) -> SpriteRect {
     SpriteRect {
-        x: col * CODEX_CELL_WIDTH,
-        y: row * CODEX_CELL_HEIGHT,
-        width: CODEX_CELL_WIDTH,
-        height: CODEX_CELL_HEIGHT,
+        x: col * PET_FRAME_WIDTH,
+        y: row * PET_FRAME_HEIGHT,
+        width: PET_FRAME_WIDTH,
+        height: PET_FRAME_HEIGHT,
     }
 }
 

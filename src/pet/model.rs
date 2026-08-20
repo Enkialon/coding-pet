@@ -1,3 +1,7 @@
+/// Native width/height of one pet animation frame (Codex v2 cell size).
+pub const PET_FRAME_WIDTH: u32 = 192;
+pub const PET_FRAME_HEIGHT: u32 = 208;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PetAnimation {
     Idle,
