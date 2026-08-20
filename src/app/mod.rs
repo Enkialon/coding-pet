@@ -23,9 +23,8 @@ use interaction::{
 };
 use state::{PetApp, PointerGesture};
 
-/// Default window size for the desktop pet.
-const WIN_WIDTH: u32 = 192;
-const WIN_HEIGHT: u32 = 208;
+/// Default window size for the desktop pet (one native frame).
+pub(crate) use crate::pet::model::{PET_FRAME_HEIGHT as WIN_HEIGHT, PET_FRAME_WIDTH as WIN_WIDTH};
 
 /// Number of test animation frames.
 const TEST_FRAME_COUNT: u32 = 6;
@@ -162,26 +161,27 @@ impl PetApp {
 
     /// Try to play the given animation; falls back to Idle if the provider doesn't have it.
     fn play_animation(&mut self, anim: PetAnimation) {
-        let animation_data = if let Some(provider) = &self.provider {
-            provider
-                .animation(anim)
-                .cloned()
-                .or_else(|| provider.animation(PetAnimation::Idle).cloned())
+        // Resolve the animation data and the label actually being played in
+        // one step so the two can never disagree:
+        // 1. requested animation if the provider has it,
+        // 2. the provider's Idle if the requested one is missing,
+        // 3. the built-in idle strip if there is no provider data at all.
+        let (actual_anim, animation_data) = if let Some(data) = self
+            .provider
+            .as_ref()
+            .and_then(|provider| provider.animation(anim).cloned())
+        {
+            (anim, data)
+        } else if let Some(data) = self
+            .provider
+            .as_ref()
+            .and_then(|provider| provider.animation(PetAnimation::Idle).cloned())
+        {
+            (PetAnimation::Idle, data)
         } else {
-            None
+            (PetAnimation::Idle, self.idle_animation())
         };
 
-        let animation_data = animation_data.unwrap_or_else(|| self.idle_animation());
-        let actual_anim = if self.provider.is_some()
-            && self
-                .provider
-                .as_ref()
-                .is_some_and(|p| p.animation(anim).is_some())
-        {
-            anim
-        } else {
-            PetAnimation::Idle
-        };
         self.animator.set_animation(actual_anim, &animation_data);
         // Reset ambient timer whenever user explicitly triggers an animation
         self.ambient_timer.reset();
