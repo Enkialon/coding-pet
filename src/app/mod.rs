@@ -56,10 +56,14 @@ impl PetApp {
         // Try to discover and load a Codex pet (optionally the one from config)
         let provider = try_load_pet(&config.pet);
 
-        // Always generate the fallback test spritesheet (cheap; used only if provider is None)
-        let sheet_width = WIN_WIDTH * TEST_FRAME_COUNT;
-        let spritesheet = generate_test_spritesheet(sheet_width, WIN_HEIGHT);
-        let stride = sheet_width as usize * 4;
+        // Only generate the fallback test spritesheet when no real pet is
+        // loaded; with a provider present it would just waste memory.
+        let (spritesheet, stride) = if provider.is_some() {
+            (Vec::new(), 0)
+        } else {
+            let sheet_width = WIN_WIDTH * TEST_FRAME_COUNT;
+            (generate_test_spritesheet(sheet_width, WIN_HEIGHT), sheet_width as usize * 4)
+        };
 
         // Configure ambient timer from config
         let mut ambient_timer = AmbientTimer::new();
@@ -508,13 +512,18 @@ impl PetApp {
     }
 
     /// Save current position and pet selection to config.
+    /// Loads the file first and only overwrites runtime fields, so legacy
+    /// keys captured in `Config::extra` survive the round trip.
     fn save_config(&self) {
         let mut config = Config::load();
-        if let Some(win) = &self.window {
-            let (x, y) = win.outer_position();
-            config.position.x = x;
-            config.position.y = y;
-        }
+        let (x, y) = if let Some(win) = &self.window {
+            win.outer_position()
+        } else {
+            // No window yet: keep the startup position instead of (0, 0).
+            self.initial_position
+        };
+        config.position.x = x;
+        config.position.y = y;
         if let Some(provider) = &self.provider {
             config.pet = provider.metadata().id.clone();
         }

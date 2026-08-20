@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +32,10 @@ pub struct Config {
     /// Language setting: "auto" (system default), "zh", or "en".
     #[serde(default = "default_lang")]
     pub language: String,
+    /// Unknown keys found in the user's config.json. Kept verbatim on save
+    /// so legacy fields from older versions are never wiped.
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -81,6 +86,7 @@ impl Default for Config {
             display_scale: default_display_scale(),
             pointer_poll_ms: default_pointer_poll_ms(),
             language: default_lang(),
+            extra: HashMap::new(),
         }
     }
 }
@@ -155,6 +161,7 @@ mod tests {
             display_scale: 1.0,
             pointer_poll_ms: 50,
             language: "auto".to_string(),
+            extra: HashMap::new(),
         };
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
@@ -186,5 +193,18 @@ mod tests {
         assert_eq!(Config::clamp_pointer_poll_ms(1), MIN_POINTER_POLL_MS);
         assert_eq!(Config::clamp_pointer_poll_ms(50), 50);
         assert_eq!(Config::clamp_pointer_poll_ms(1000), MAX_POINTER_POLL_MS);
+    }
+
+    #[test]
+    fn test_unknown_legacy_fields_survive_roundtrip() {
+        let json = r#"{"pet": "cat", "legacy_scale": 0.8, "theme": "dark"}"#;
+        let mut config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.extra.len(), 2);
+        // Mutate a runtime field the way save_config does, then serialize.
+        config.display_scale = 1.5;
+        let saved = serde_json::to_string(&config).unwrap();
+        assert!(saved.contains("legacy_scale"));
+        assert!(saved.contains("\"theme\""));
+        assert!(saved.contains("\"dark\""));
     }
 }
