@@ -63,39 +63,16 @@ impl PetWindow {
             _ => return Err(crate::error::AppError::Window("Not a Win32 window".into())),
         };
 
-        // Apply extended window styles: layered + always-on-top + tool window
-        // Also remove WS_THICKFRAME to prevent Aero Snap (screen-edge maximise).
-        unsafe {
-            // Remove resizable frame styles — prevents DWM Aero Snap
-            let style = GetWindowLongPtrW(hwnd as _, GWL_STYLE);
-            let new_style = style as usize
-                & !(WS_THICKFRAME as usize | WS_MINIMIZEBOX as usize | WS_MAXIMIZEBOX as usize);
-            SetWindowLongPtrW(hwnd as _, GWL_STYLE, new_style as _);
-
-            let ex_style = GetWindowLongPtrW(hwnd as _, GWL_EXSTYLE);
-            let new_ex = ex_style as usize
-                | WS_EX_LAYERED as usize
-                | WS_EX_TOPMOST as usize
-                | WS_EX_TOOLWINDOW as usize;
-            SetWindowLongPtrW(hwnd as _, GWL_EXSTYLE, new_ex as _);
-            // SetWindowLongPtrW alone doesn't change Z-order — must call SetWindowPos
-            SetWindowPos(
-                hwnd as _,
-                HWND_TOPMOST,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            );
-        }
-
-        Ok(PetWindow {
+        let pet = PetWindow {
             window,
             hwnd,
             width,
             height,
-        })
+        };
+        // Apply the custom pet window styles (see reapply_styles).
+        unsafe { pet.reapply_styles(true) };
+
+        Ok(pet)
     }
 
     /// Native drag is unused: it blocks the event loop so run animations freeze.
@@ -106,6 +83,47 @@ impl PetWindow {
 
     pub fn native_handle(&self) -> Result<NativeWindowHandle, crate::error::AppError> {
         Ok(NativeWindowHandle::Win32(self.hwnd))
+    }
+
+    /// Re-apply the custom pet window styles to the HWND.
+    ///
+    /// winit rewrites GWL_STYLE/GWL_EXSTYLE from its own flag model whenever a
+    /// window flag changes at runtime (e.g. `set_visible`), dropping the styles
+    /// we set manually — losing WS_EX_LAYERED makes the UpdateLayeredWindow
+    /// content vanish and restores the title bar. Call this after any such
+    /// winit state change to restore the borderless layered pet window.
+    ///
+    /// # Safety
+    /// `self.hwnd` must be a valid top-level HWND for this process.
+    pub unsafe fn reapply_styles(&self, topmost: bool) {
+        // Remove resizable frame styles — prevents DWM Aero Snap
+        let style = GetWindowLongPtrW(self.hwnd as _, GWL_STYLE);
+        let new_style = style as usize
+            & !(WS_THICKFRAME as usize | WS_MINIMIZEBOX as usize | WS_MAXIMIZEBOX as usize);
+        SetWindowLongPtrW(self.hwnd as _, GWL_STYLE, new_style as _);
+
+        let ex_style = GetWindowLongPtrW(self.hwnd as _, GWL_EXSTYLE);
+        let mut new_ex = (ex_style as usize & !WS_EX_TOPMOST as usize)
+            | WS_EX_LAYERED as usize
+            | WS_EX_TOOLWINDOW as usize;
+        if topmost {
+            new_ex |= WS_EX_TOPMOST as usize;
+        }
+        SetWindowLongPtrW(self.hwnd as _, GWL_EXSTYLE, new_ex as _);
+        // SetWindowLongPtrW alone doesn't change Z-order — must call SetWindowPos
+        SetWindowPos(
+            self.hwnd as _,
+            if topmost {
+                HWND_TOPMOST
+            } else {
+                windows_sys::Win32::UI::WindowsAndMessaging::HWND_NOTOPMOST
+            },
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
     }
 
     pub fn set_always_on_top(&self, enabled: bool) {

@@ -654,6 +654,19 @@ impl PetApp {
                 self.visible = !self.visible;
                 if let Some(win) = &self.window {
                     win.window.set_visible(self.visible);
+                    // On Windows, set_visible lets winit rewrite GWL_STYLE/GWL_EXSTYLE
+                    // from its flag model, dropping WS_EX_LAYERED and the borderless
+                    // styles; restore them so the pet doesn't vanish. Without a tray
+                    // there is no way to toggle top-most at runtime, so fall back to
+                    // the startup config snapshot.
+                    #[cfg(target_os = "windows")]
+                    {
+                        let topmost = self
+                            .tray
+                            .as_ref()
+                            .map_or(self.initial_always_on_top, |t| t.always_on_top);
+                        unsafe { win.reapply_styles(topmost) };
+                    }
                 }
                 tracing::info!("Window visibility toggled: {}", self.visible);
             }
