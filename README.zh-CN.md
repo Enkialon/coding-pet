@@ -2,134 +2,71 @@
 
 [English](README.md) | 简体中文
 
-CodingPet 是一个使用 Rust 编写的轻量级 Windows 与 macOS 程序员桌面宠物。
+一只会响应 AI 编程状态的原生轻量桌面宠物。
 
-它兼容 Codex 自定义宠物资源格式，可以直接在桌面显示动画宠物，并通过统一的本地事件协议接入 Codex、Cursor、Claude Code、IDE、Git 和 CI 等编程工具。
+**Windows 典型内存约 14 MB · 空闲 CPU 约 0% · 原生 Rust · 无 WebView · 无额外运行时**
 
-## 功能特性（V0.1）
+Windows · macOS
 
-- 桌面透明无边框动画宠物
-- 窗口始终置顶
-- 拖动宠物调整位置，并播放对应方向的移动动画
-- 支持 Codex v2 的 16 个顺时针注视方向
-- 支持多显示器和负坐标
-- 支持每显示器 DPI 感知
-- 加载 Codex v2 宠物图集（1536×2288、8×11、PNG/WebP）
-- 迁移期间兼容旧版 Codex v1 8×9 宠物
-- 自动发现 `~/.codex/pets/` 下的宠物
-- Windows 系统托盘或 macOS 菜单栏图标，可显示、隐藏和退出
-- 右键菜单播放动画和切换宠物
-- 可选的随机待机动画
-- 自动保存宠物选择、窗口位置和设置
-- 事件驱动，空闲时几乎不占用 CPU
-- 面向 Codex 和其他编程工具的本地集成 API
+[**下载 Windows x86_64 版**](https://github.com/Enkialon/coding-pet/releases/download/v0.2.2/coding-pet-v0.2.2-windows-x86_64.exe) · [**下载 macOS 通用版**](https://github.com/Enkialon/coding-pet/releases/download/v0.2.2/coding-pet-v0.2.2-macos-universal.zip) · [全部版本](https://github.com/Enkialon/coding-pet/releases)
 
-## 构建
+CodingPet 把编程 Agent 的事件变成宠物动画，让你一眼看出 Agent 正在工作、等待操作、已经完成，还是执行失败。
 
-需要 Windows 或 macOS，以及 Rust stable 工具链。
+| Agent 状态 | 宠物反应 |
+|---|---|
+| 工作中 | 跑步 |
+| 审查或调用工具 | 审查 |
+| 等待输入或授权 | 等待 |
+| 已完成 | 挥手 |
+| 失败 | 失败 |
 
-```bash
-cargo build --release
-```
+## 为什么选择 CodingPet？
 
-构建产物：
+- **足够轻量：** Windows GDI 后端的典型内存占用约 14 MB。
+- **空闲安静：** 事件驱动，不在后台持续重绘或轮询。
+- **真正原生：** 纯 Rust；Windows 使用 Win32/GDI，macOS 使用 AppKit/Metal。
+- **没有 WebView：** 不启动浏览器进程，也不要求安装额外运行时。
+- **开放宠物格式：** 支持 Codex v2 PNG/WebP 宠物，并兼容旧版 Codex v1 宠物。
+- **统一事件协议：** Codex 与其他编程工具可以驱动同一套本地事件接口。
 
-```text
-target/release/coding-pet.exe
-target/release/coding-pet
-```
+## 快速开始
 
-Windows 产物是单文件可执行程序；GitHub Release 会提供同时支持 Intel 和 Apple Silicon 的 macOS `.app` 压缩包。两者都不需要额外运行时。
+1. 下载对应平台的版本。
+2. 启动 CodingPet。
+3. 将 Codex 兼容宠物放入 `~/.codex/pets/`，或直接使用其中已有的宠物。
+4. 使用下方内置发送器或适配器连接编程工具。
 
-## 运行
-
-双击下载的应用，或者在终端运行本地构建产物：
-
-```powershell
-.\target\release\coding-pet.exe
-```
-
-```bash
-./target/release/coding-pet
-```
-
-启用调试日志：
-
-```powershell
-$env:RUST_LOG = "debug"
-.\target\release\coding-pet.exe
-```
+CodingPet 会自动发现包含 `spritesheet.webp` 或 `spritesheet.png` 的宠物目录。如果尚未安装宠物，程序会显示自动生成的备用图集，保证应用仍可运行；v0.2.2 暂未附带正式的 starter pet。
 
 ## 编程工具集成
 
-CodingPet 会在 `127.0.0.1` 的随机端口启动带令牌保护的 HTTP API，并在可执行文件中提供通用事件发送器：
+CodingPet v0.2.2 已包含统一的本地事件 API、通用命令行发送器和内置 Codex Hook 适配器。其他工具可将自己的生命周期事件转换为相同协议。
 
 ```powershell
 coding-pet.exe emit agent.turn.started --source codex --session turn-123
-coding-pet.exe emit agent.turn.completed --source cursor --session turn-123
 coding-pet.exe emit agent.input.required --source claude-code --message "需要批准"
+coding-pet.exe emit agent.turn.completed --source cursor --session turn-123
 ```
 
-Codex、Claude Code、Cursor、IDE、Git 和 CI 适配器只需要把自身生命周期事件转换成相同的版本化事件信封。宠物核心不解析各工具的私有负载。
+目前仍需手动配置 Hook，一键安装尚在计划中。Codex 适配器、事件目录、HTTP 契约、安全机制和适配规则见[集成协议 v1](docs/integrations.md)。
 
-完整事件目录、HTTP 契约、安全机制和适配规则请参阅[集成协议 v1](docs/integrations.md)。
+## 宠物资源
 
-## Codex 宠物导入
-
-CodingPet 会自动扫描 Codex 的本地宠物目录：
+CodingPet 自动扫描：
 
 ```text
 ~/.codex/pets/
 ```
 
-### 目录结构
-
 ```text
 .codex/
 └── pets/
-    ├── cat/
-    │   ├── pet.json
-    │   └── spritesheet.webp
-    └── dog/
+    └── cat/
         ├── pet.json
-        └── spritesheet.png
+        └── spritesheet.webp
 ```
 
-### Codex v2 图集格式
-
-- 资源契约：Codex v2（`spriteVersionNumber: 2`）
-- 图集尺寸：1536×2288
-- 文件格式：带透明通道的 PNG 或 WebP
-- 网格：8 列×11 行
-- 单元格：192×208
-- 未声明 `spriteVersionNumber` 的 1536×1872 图集按旧版 v1 加载
-
-### 动画布局
-
-| 行 | 动画 | 帧数 |
-|---:|---|---:|
-| 0 | 待机（Idle） | 6 |
-| 1 | 向右拖动（Running Right） | 8 |
-| 2 | 向左拖动（Running Left） | 8 |
-| 3 | 挥手（Waving） | 4 |
-| 4 | 跳跃（Jumping） | 5 |
-| 5 | 失败（Failed） | 8 |
-| 6 | 等待输入（Waiting） | 6 |
-| 7 | 工作中（Running） | 6 |
-| 8 | 审查中（Review） | 6 |
-| 9 | 000°～157.5° 注视方向 | 8 |
-| 10 | 180°～337.5° 注视方向 | 8 |
-
-第 9～10 行组成连续顺时针的 16 个注视方向：
-
-- `000°`：向上
-- `090°`：屏幕右侧
-- `180°`：向下
-- `270°`：屏幕左侧
-
-鼠标位于宠物中心死区时，宠物恢复正常待机或当前编程任务状态。
-
-### pet.json
+主要格式为 Codex v2：1536×2288 的透明 PNG 或 WebP 图集，按 8 列×11 行排列。旧版 1536×1872 Codex v1 图集仍然可用。
 
 ```json
 {
@@ -141,72 +78,62 @@ CodingPet 会自动扫描 Codex 的本地宠物目录：
 }
 ```
 
-未知字段会被忽略，以便向前兼容。省略 `spriteVersionNumber` 时使用旧版 v1 契约。
+动画行包含待机、拖动、挥手、跳跃、失败、等待、工作、审查，以及 16 个顺时针鼠标注视方向。未知的 `pet.json` 字段会被忽略，以便向前兼容。
 
-## 配置
+## 日常功能
 
-配置文件位置：
+- 透明、无边框、始终置顶的宠物窗口
+- 拖动调整位置并播放方向动画
+- 16 个方向的鼠标注视
+- 多显示器与每显示器 DPI 支持
+- Windows 系统托盘与 macOS 菜单栏控制
+- 右键播放动画和切换宠物
+- 可选环境动画和设置持久化
 
-```text
-%APPDATA%\CodingPet\config\config.json
-```
-
-示例：
-
-```json
-{
-  "pet": "my-pet",
-  "position": { "x": 1200, "y": 700 },
-  "scale": 0.75,
-  "always_on_top": true,
-  "idle_animation": false,
-  "language": "auto"
-}
-```
-
-配置字段：
-
-| 字段 | 说明 |
-|---|---|
-| `pet` | 当前宠物 ID |
-| `position` | 窗口在桌面上的物理像素坐标 |
-| `scale` | 宠物缩放比例 |
-| `always_on_top` | 是否保持置顶 |
-| `idle_animation` | 是否启用随机待机动画 |
-| `language` | `auto`、`zh` 或 `en` |
-
-配置缺失或损坏时会自动使用默认值。
-
-## 交互优先级
-
-宠物动画按以下优先级进行仲裁：
+动画按以下优先级显示：
 
 ```text
-拖动动画 > 鼠标注视 > 编程工具状态 > 随机待机动画
+拖动动画 > 鼠标注视 > 编程工具状态 > 环境动画
 ```
 
-鼠标交互期间收到的 Hook 事件不会丢失；交互结束后会继续显示最新的任务状态或一次性通知动画。
+鼠标交互期间收到的 Agent 事件不会丢失，交互结束后会继续显示。
 
-## 性能目标
+## 性能
 
-| 指标 | 目标 |
+CodingPet 面向常驻桌面的事件驱动场景设计。当前 Windows GDI 后端在一般使用中的典型内存占用约为 14 MB。
+
+| 指标 | 当前目标 |
 |---|---|
-| 空闲 CPU | 约 0%（事件驱动，无忙轮询） |
+| 空闲 CPU | 约 0% |
 | 动画 CPU | 小于 2% |
-| 常驻内存 | Windows GDI 后端小于 30 MB（典型约 14 MB） |
-| 启动速度 | 即时启动，无启动画面和网络请求 |
+| Windows 常驻内存 | 小于 30 MB；典型约 14 MB |
+| 启动 | 无启动画面和网络请求 |
 
-## 架构
+具体数值会受平台、宠物资源、显示缩放和测量方式影响；以上是当前工程目标，并非完整的跨平台基准测试结果。
 
-- 纯 Rust、单线程事件循环
-- 动画、宠物资源、Hook 和配置组成跨平台核心
-- Windows 后端使用 Win32 `UpdateLayeredWindow` 实现逐像素透明
-- macOS 后端使用透明 AppKit 窗口和事件驱动的 Metal 表面
-- 使用 `winit` 处理窗口和输入事件
+## 开发
+
+### 构建
+
+在 Windows 或 macOS 安装 Rust stable 工具链，然后运行：
+
+```bash
+cargo build --release
+```
+
+Windows 产物为 `target/release/coding-pet.exe`，macOS 产物为 `target/release/coding-pet`。GitHub Releases 另行提供 macOS 通用 `.app` 包。
+
+### 配置
+
+Windows 设置保存在 `%APPDATA%\CodingPet\config\config.json`。配置缺失或损坏时会自动恢复默认值。
+
+### 架构
+
+- 单线程、事件驱动的 Rust 核心
+- 跨平台动画、宠物资源、配置和工具集成层
+- Windows 使用 Win32 `UpdateLayeredWindow` 实现逐像素透明
+- macOS 使用透明 AppKit 窗口和事件驱动的 Metal 表面
 - 仅在动画帧变化时重绘
-- 不使用 WebView 或外部运行时；Windows 后端仍为纯 CPU/GDI
-- 宠物资源层采用 Codex v2 契约
-- 工具集成层采用独立的提供方无关事件协议
 
 ```text
 src/
@@ -215,30 +142,16 @@ src/
 ├── integration/  # CLI、HTTP 服务、运行时和编程工具事件
 ├── pet/          # Codex 资源、共享模型和 Provider 契约
 ├── platform/     # Windows 与 macOS 原生窗口和渲染后端
-├── ui/           # 托盘及未来的设置界面
+├── ui/           # 托盘和设置界面
 └── main.rs       # 进程入口
 ```
 
-## 路线图
+## 项目状态
 
-- **V0.2**：提供方适配器和可配置的事件动画映射
-- **V0.3**：AI 任务状态显示和 Toast 通知
-- **V0.4**：久坐、喝水、眼睛和手腕休息提醒
-- **V0.5**：自定义事件映射、设置界面和插件系统
+当前版本：**v0.2.2**
 
-## 发布
-
-推送语义化版本标签后，GitHub Actions 会自动测试 Windows 和 macOS，构建 Windows x86_64 可执行文件与 macOS 通用应用，生成 SHA-256 校验文件，并发布到 GitHub Release。
-
-```powershell
-# 先更新 Cargo.toml 中的版本号，然后执行：
-git commit -am "chore: release v0.0.2"
-git tag v0.0.2
-git push origin main v0.0.2
-```
-
-标签去掉开头的 `v` 后，必须与 `Cargo.toml` 中的包版本完全一致。
+目前已提供统一事件协议、通用发送器、Codex Hook 适配器、事件动画状态和设置界面。后续计划包括更简单的 Hook 安装、starter pet 初次体验、通知、休息提醒，以及可自定义的映射和适配器。
 
 ## 许可证
 
-待定。
+本项目采用 [Apache License 2.0](LICENSE)。

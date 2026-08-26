@@ -2,123 +2,71 @@
 
 English | [简体中文](README.zh-CN.md)
 
-A lightweight native desktop pet for Windows and macOS, powered by Rust.
+A tiny native desktop companion that reacts to your AI coding workflow.
 
-CodingPet is an extremely lightweight programmer's desktop pet. It uses the Codex v2 custom-pet asset contract and a provider-neutral local event protocol, displaying coding activity directly on your desktop with near-zero idle resource usage.
+**~14 MB typical Windows memory · ~0% idle CPU · Native Rust · No WebView · No extra runtime**
 
-## Features (V0.1)
+Windows · macOS
 
-- Transparent borderless animated pet on desktop
-- Always On Top
-- Mouse drag to reposition with directional pet animation
-- Codex v2 pointer look directions (16 clockwise poses)
-- Multi-monitor support (including negative coordinates)
-- Per-monitor DPI aware
-- Loads Codex v2 pet spritesheets (1536×2288, 8×11 grid, PNG/WebP)
-- Reads legacy Codex v1 8×9 pets during migration
-- Auto-discovers pets from `~/.codex/pets/`
-- Windows system tray or macOS menu-bar icon with show/hide/exit
-- Right-click context menu (play animations, select pet)
-- Random ambient animations (wave/jump)
-- Configuration persistence
-- Event-driven (near-zero idle CPU)
-- Local integration API for Codex and other coding tools
+[**Download for Windows (x86_64)**](https://github.com/Enkialon/coding-pet/releases/download/v0.2.2/coding-pet-v0.2.2-windows-x86_64.exe) · [**Download for macOS (Universal)**](https://github.com/Enkialon/coding-pet/releases/download/v0.2.2/coding-pet-v0.2.2-macos-universal.zip) · [All releases](https://github.com/Enkialon/coding-pet/releases)
 
-## Build
+CodingPet turns coding-agent events into visible pet animations, so you can tell at a glance whether your agent is working, waiting for you, finished, or failed.
 
-Requires the stable Rust toolchain on Windows or macOS.
+| Coding-agent state | Pet response |
+|---|---|
+| Working | Running |
+| Reviewing or using a tool | Review |
+| Waiting for input or permission | Waiting |
+| Completed | Waving |
+| Failed | Failed |
 
-```bash
-cargo build --release
-```
+## Why CodingPet?
 
-Output:
+- **Tiny by design:** typical memory use is about 14 MB on the Windows GDI backend.
+- **Quiet when idle:** the event-driven loop does not continuously redraw or poll.
+- **Truly native:** pure Rust, with Win32/GDI on Windows and AppKit/Metal on macOS.
+- **No WebView:** no browser process and no separate runtime to install.
+- **Open pet format:** loads Codex v2 PNG/WebP pets and legacy Codex v1 pets.
+- **Tool-neutral events:** Codex and other tools can drive the same local integration protocol.
 
-- Windows: `target/release/coding-pet.exe`
-- macOS: `target/release/coding-pet` (GitHub Releases provide a universal `.app` bundle)
+## Get started
 
-## Run
+1. Download the build for your platform above.
+2. Start CodingPet.
+3. Put a Codex-compatible pet in `~/.codex/pets/`, or use a pet already installed there.
+4. Connect your coding tool using the built-in emitter or adapter described below.
 
-Double-click the downloaded application, or run the locally built executable:
+CodingPet automatically discovers pet folders containing `spritesheet.webp` or `spritesheet.png`. If no pet is installed yet, it opens with a generated fallback sheet so the application remains usable; a bundled starter pet is not included in v0.2.2.
 
-```powershell
-.\target\release\coding-pet.exe
-```
+## Coding-tool integration
 
-```bash
-./target/release/coding-pet
-```
-
-For debug logging:
-
-```powershell
-$env:RUST_LOG = "debug"
-.\target\release\coding-pet.exe
-```
-
-## Coding-tool integrations
-
-CodingPet exposes a token-protected HTTP API on a random loopback port and includes a generic
-event emitter for hooks:
+CodingPet v0.2.2 includes a provider-neutral local event API, a generic command-line emitter, and a built-in Codex hook adapter. Integrations for other tools can translate their lifecycle events into the same protocol.
 
 ```powershell
 coding-pet.exe emit agent.turn.started --source codex --session turn-123
-coding-pet.exe emit agent.turn.completed --source codex --session turn-123
+coding-pet.exe emit agent.input.required --source claude-code --message "Approval needed"
+coding-pet.exe emit agent.turn.completed --source cursor --session turn-123
 ```
 
-Codex, Claude Code, Cursor, IDE, Git, and CI adapters all translate their native lifecycle events
-into the same versioned event envelope. See [Integration Protocol v1](docs/integrations.md) for
-the event catalog, HTTP contract, security model, and adapter rules.
+Hook setup is currently manual; one-click installation is planned. See [Integration Protocol v1](docs/integrations.md) for the Codex adapter, event catalog, HTTP contract, security model, and adapter rules.
 
-## Codex Pet Import
+## Pet assets
 
-CodingPet automatically discovers pets from the Codex pets directory in the current user's home:
+CodingPet discovers pets in:
 
-```
+```text
 ~/.codex/pets/
 ```
 
-### Directory Structure
-
-```
+```text
 .codex/
 └── pets/
-    ├── cat/
-    │   ├── pet.json        (optional metadata)
-    │   └── spritesheet.webp
-    └── dog/
+    └── cat/
         ├── pet.json
-        └── spritesheet.png
+        └── spritesheet.webp
 ```
 
-### Spritesheet Format
-
-- Primary contract: Codex v2 (`spriteVersionNumber: 2`)
-- Dimensions: 1536 × 2288 pixels
-- Format: PNG or WebP with transparency
-- Grid: 8 columns × 11 rows (192×208 per cell)
-- Legacy v1 sheets without `spriteVersionNumber` remain readable at 1536 × 1872
-
-### Animation Layout
-
-| Row | Animation | Frames |
-|-----|-----------|--------|
-| 0 | Idle | 6 |
-| 1 | Running Right | 8 |
-| 2 | Running Left | 8 |
-| 3 | Waving | 4 |
-| 4 | Jumping | 5 |
-| 5 | Failed | 8 |
-| 6 | Waiting | 6 |
-| 7 | Running | 6 |
-| 8 | Review | 6 |
-| 9 | Look directions 000°–157.5° | 8 |
-| 10 | Look directions 180°–337.5° | 8 |
-
-Rows 9–10 contain one continuous clockwise set of 16 look poses. `000°` is up,
-`090°` is screen-right, `180°` is down, and `270°` is screen-left.
-
-### pet.json
+The primary format is Codex v2: a transparent 1536×2288 PNG or WebP spritesheet arranged as an 8×11 grid. Legacy 1536×1872 Codex v1 sheets remain supported.
 
 ```json
 {
@@ -130,10 +78,17 @@ Rows 9–10 contain one continuous clockwise set of 16 look poses. `000°` is up
 }
 ```
 
-Unknown fields are ignored for forward compatibility. Omitting
-`spriteVersionNumber` selects the legacy v1 contract.
+The animation rows cover idle, dragging, waving, jumping, failure, waiting, running, review, and 16 clockwise pointer-look directions. Unknown `pet.json` fields are ignored for forward compatibility.
 
-## Interaction priority
+## Everyday features
+
+- Transparent, borderless, always-on-top pet window
+- Drag to reposition, with directional animation
+- Pointer tracking with 16 look directions
+- Multi-monitor and per-monitor DPI support
+- Windows system tray and macOS menu-bar controls
+- Right-click animation and pet selection
+- Optional ambient animations and persistent settings
 
 Animation states are resolved in this order:
 
@@ -141,55 +96,44 @@ Animation states are resolved in this order:
 drag animation > pointer look > coding-tool status > ambient animation
 ```
 
-Hook events received during pointer interaction are retained. When interaction ends, CodingPet
-continues with the latest task state or deferred one-shot notification.
+Events received during pointer interaction are retained and shown after the interaction ends.
 
-## Configuration
+## Performance
 
-Config file location: `%APPDATA%\CodingPet\config\config.json`
+CodingPet is designed for an event-driven, always-running desktop workload. The current Windows GDI backend typically uses about 14 MB of memory in normal use.
 
-```json
-{
-  "pet": "cat",
-  "position": { "x": 1200, "y": 700 },
-  "scale": 0.75,
-  "always_on_top": true,
-  "idle_animation": false,
-  "language": "auto"
-}
+| Metric | Current target |
+|---|---|
+| Idle CPU | ≈ 0% |
+| Animating CPU | < 2% |
+| Windows RSS memory | < 30 MB; typically ~14 MB |
+| Startup | No splash screen or network request |
+
+Figures depend on platform, pet asset, display scale, and measurement method. These are current engineering targets rather than a cross-platform benchmark suite.
+
+## Development
+
+### Build
+
+Install the stable Rust toolchain on Windows or macOS, then run:
+
+```bash
+cargo build --release
 ```
 
-| Field | Meaning |
-|---|---|
-| `pet` | Active pet ID |
-| `position` | Window position in physical desktop pixels |
-| `scale` | Pet scale factor |
-| `always_on_top` | Keep the pet above other windows |
-| `idle_animation` | Enable random ambient animations |
-| `language` | `auto`, `zh`, or `en` |
+The output is `target/release/coding-pet.exe` on Windows or `target/release/coding-pet` on macOS. GitHub Releases provide a universal macOS `.app` bundle.
 
-Missing or corrupt configuration is automatically reset to defaults.
+### Configuration
 
-## Performance Targets
+Settings are stored in `%APPDATA%\CodingPet\config\config.json` on Windows. Missing or corrupt configuration is reset to defaults.
 
-| Metric | Target |
-|--------|--------|
-| Idle CPU | ≈ 0% (event-driven, no busy loop) |
-| Animating CPU | < 2% |
-| RSS Memory | < 30 MB on the Windows GDI backend (typical ~14 MB) |
-| Startup | Instant (no splash, no network) |
+### Architecture
 
-## Architecture
-
-- Pure Rust, single-threaded
-- Platform-neutral animation, pet asset, hook, and configuration core
-- Windows backend: Win32 `UpdateLayeredWindow` per-pixel transparency
-- macOS backend: transparent AppKit window with an event-driven Metal surface
-- `winit` for event loop and input handling
-- Event-driven animation (only redraws on frame change)
-- No WebView or external runtime; Windows remains CPU/GDI-only
-- Codex v2 asset contract in the pet resource layer
-- Independent provider-neutral protocol in the coding-tool integration layer
+- Single-threaded, event-driven Rust core
+- Platform-neutral animation, pet asset, configuration, and integration layers
+- Win32 `UpdateLayeredWindow` per-pixel transparency on Windows
+- Transparent AppKit window with an event-driven Metal surface on macOS
+- Redraws only when an animation frame changes
 
 ```text
 src/
@@ -198,30 +142,16 @@ src/
 ├── integration/  # CLI, HTTP server, runtime, and coding-tool events
 ├── pet/          # Codex assets, shared models, and provider contract
 ├── platform/     # native Windows and macOS window/rendering backends
-├── ui/           # tray and future settings UI
+├── ui/           # tray and settings UI
 └── main.rs       # process entry point
 ```
 
-## Roadmap
+## Project status
 
-- **V0.2**: Provider adapters and configurable event-to-animation mappings
-- **V0.3**: AI task status display (running/needs input/completed/failed), Toast notifications
-- **V0.4**: Break reminders (sitting, water, eyes, wrist)
-- **V0.5**: Custom event mapping, settings UI, plugin/adapter system
+Current release: **v0.2.2**
 
-## Releasing
-
-Pushing a semantic version tag automatically tests Windows and macOS, builds a Windows x86_64 executable and a universal macOS app, generates SHA-256 checksums, and publishes them to a GitHub Release.
-
-```powershell
-# First update the version in Cargo.toml, then:
-git commit -am "chore: release v0.0.2"
-git tag v0.0.2
-git push origin main v0.0.2
-```
-
-The tag (without its leading `v`) must exactly match the package version in `Cargo.toml`.
+Available now: the provider-neutral event protocol, generic emitter, Codex hook adapter, event-to-animation states, and settings UI. Planned work includes easier hook installation, a starter-pet experience, notifications, break reminders, and customizable mappings/adapters.
 
 ## License
 
-[TBD]
+Licensed under the [Apache License 2.0](LICENSE).
