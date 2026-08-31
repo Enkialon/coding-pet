@@ -2,6 +2,7 @@
 name = "coding-pet"
 version = "0.2.2"
 edition = "2021"
+rust-version = "1.92"
 license = "Apache-2.0"
 
 [dependencies]
@@ -14,10 +15,11 @@ serde_json = "1"
 directories = "5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-egui = "0.32"
-egui-wgpu = "0.32"
+egui = "0.35"
+egui-components = "0.3"
+egui-wgpu = "0.35"
 pollster = "1.0.1"
-egui-winit = { version = "0.32", default-features = false, features = ["clipboard"] }
+egui-winit = { version = "0.35", default-features = false, features = ["clipboard"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [

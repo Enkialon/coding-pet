@@ -83,6 +83,28 @@ pub struct UiStrings {
     pub settings: &'static str,
 }
 
+/// Strings used by the on-demand settings window.
+pub struct SettingsStrings {
+    pub window_title: &'static str,
+    pub page_title: &'static str,
+    pub page_description: &'static str,
+    pub appearance: &'static str,
+    pub pet_size: &'static str,
+    pub pet_size_description: &'static str,
+    pub awareness_range: &'static str,
+    pub awareness_range_description: &'static str,
+    pub poll_interval: &'static str,
+    pub poll_interval_description: &'static str,
+    pub behavior: &'static str,
+    pub loop_idle: &'static str,
+    pub loop_idle_description: &'static str,
+    pub idle_animation: &'static str,
+    pub idle_animation_description: &'static str,
+    pub always_on_top: &'static str,
+    pub always_on_top_description: &'static str,
+    pub auto_save: &'static str,
+}
+
 /// Return the set of UI strings for the given locale.
 pub fn ui_strings(locale: Locale) -> UiStrings {
     match locale {
@@ -125,6 +147,51 @@ pub fn ui_strings(locale: Locale) -> UiStrings {
             always_on_top_check: "Always on Top ✓",
             tray_tooltip: "CodingPet - Desktop Pet",
             settings: "Settings",
+        },
+    }
+}
+
+pub fn settings_strings(locale: Locale) -> SettingsStrings {
+    match locale {
+        Locale::Zh => SettingsStrings {
+            window_title: "CodingPet 设置",
+            page_title: "照顾好你的桌面伙伴",
+            page_description: "按你喜欢的方式调整外观和互动，改动会立即生效。",
+            appearance: "外观与感应",
+            pet_size: "宠物大小",
+            pet_size_description: "只改变屏幕上的显示尺寸",
+            awareness_range: "感应范围",
+            awareness_range_description: "鼠标靠近时，宠物会看向你",
+            poll_interval: "感应刷新间隔",
+            poll_interval_description: "越低越跟手，越高轮询越少",
+            behavior: "日常行为",
+            loop_idle: "循环待机动画",
+            loop_idle_description: "空闲时持续播放待机动作",
+            idle_animation: "随机闲置动作",
+            idle_animation_description: "偶尔做一个小动作陪伴你",
+            always_on_top: "保持在最前面",
+            always_on_top_description: "让宠物不会被其他窗口挡住",
+            auto_save: "所有改动都会自动保存",
+        },
+        Locale::En => SettingsStrings {
+            window_title: "CodingPet Settings",
+            page_title: "Care for your desktop buddy",
+            page_description: "Tune its look and behavior. Changes take effect instantly.",
+            appearance: "Appearance & awareness",
+            pet_size: "Pet size",
+            pet_size_description: "Changes its on-screen size only",
+            awareness_range: "Awareness range",
+            awareness_range_description: "The pet looks over when your pointer is nearby",
+            poll_interval: "Awareness refresh",
+            poll_interval_description: "Lower feels quicker; higher polls less often",
+            behavior: "Everyday behavior",
+            loop_idle: "Loop idle animation",
+            loop_idle_description: "Keep the idle animation moving",
+            idle_animation: "Random idle actions",
+            idle_animation_description: "Occasionally perform a small companion action",
+            always_on_top: "Keep in front",
+            always_on_top_description: "Prevent other windows from covering the pet",
+            auto_save: "Every change is saved automatically",
         },
     }
 }
