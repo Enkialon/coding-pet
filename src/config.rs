@@ -29,6 +29,14 @@ pub struct Config {
     /// How often to poll the global cursor for the awareness ring, in milliseconds.
     #[serde(default = "default_pointer_poll_ms")]
     pub pointer_poll_ms: u64,
+    /// When true, the Codex `PermissionRequest` hook auto-allows approvals.
+    /// Question / input prompts are never auto-answered.
+    #[serde(default = "default_false")]
+    pub auto_approve_permissions: bool,
+    /// When true, the integration API also accepts LAN clients (binds `0.0.0.0`).
+    /// Restart required. Port/token are fixed (`18765` / `coding-pet`).
+    #[serde(default = "default_false")]
+    pub integration_listen_lan: bool,
     /// Language setting: "auto" (system default), "zh", or "en".
     #[serde(default = "default_lang")]
     pub language: String,
@@ -85,6 +93,8 @@ impl Default for Config {
             look_range: default_look_range(),
             display_scale: default_display_scale(),
             pointer_poll_ms: default_pointer_poll_ms(),
+            auto_approve_permissions: false,
+            integration_listen_lan: false,
             language: default_lang(),
             extra: HashMap::new(),
         }
@@ -143,6 +153,8 @@ mod tests {
         assert!(config.always_on_top);
         assert!(!config.idle_animation);
         assert!(config.loop_idle);
+        assert!(!config.auto_approve_permissions);
+        assert!(!config.integration_listen_lan);
         assert_eq!(config.look_range, 240);
         assert_eq!(config.display_scale, 1.0);
         assert_eq!(config.pointer_poll_ms, 50);
@@ -160,6 +172,8 @@ mod tests {
             look_range: 240,
             display_scale: 1.0,
             pointer_poll_ms: 50,
+            auto_approve_permissions: false,
+            integration_listen_lan: false,
             language: "auto".to_string(),
             extra: HashMap::new(),
         };
@@ -168,6 +182,8 @@ mod tests {
         assert_eq!(loaded.pet, "test:cat");
         assert_eq!(loaded.position.x, 100);
         assert_eq!(loaded.position.y, 200);
+        assert!(!loaded.auto_approve_permissions);
+        assert!(!loaded.integration_listen_lan);
     }
 
     #[test]
@@ -186,6 +202,8 @@ mod tests {
         assert_eq!(config.look_range, 240);
         assert_eq!(config.display_scale, 1.0);
         assert_eq!(config.pointer_poll_ms, 50);
+        assert!(!config.auto_approve_permissions);
+        assert!(!config.integration_listen_lan);
     }
 
     #[test]

@@ -1,9 +1,9 @@
+use super::codex_hook::process_codex_hook;
 use super::event::AgentEvent;
-use super::runtime::{runtime_path, RuntimeDescriptor};
 use super::AppUserEvent;
+use crate::config::Config;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -12,36 +12,33 @@ use winit::event_loop::EventLoopProxy;
 
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
+/// Fixed integration port so clients can hardcode the URL.
+pub const INTEGRATION_PORT: u16 = 18765;
+/// Fixed bearer token for local/LAN clients (not a public-internet secret).
+pub const INTEGRATION_TOKEN: &str = "coding-pet";
 
 pub struct IntegrationServer {
     shutdown: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
-    runtime_path: PathBuf,
     address: SocketAddr,
 }
 
 impl IntegrationServer {
     pub fn start(proxy: EventLoopProxy<AppUserEvent>) -> Result<Self, std::io::Error> {
-        let listener = TcpListener::bind(("127.0.0.1", 0))?;
-        let address = listener.local_addr()?;
-        let token = generate_token()?;
-        let runtime_path = runtime_path().ok_or_else(|| {
+        let listen_lan = Config::load().integration_listen_lan;
+        let bind_ip = if listen_lan {
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        } else {
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        };
+        let bind_address = SocketAddr::new(bind_ip, INTEGRATION_PORT);
+        let listener = TcpListener::bind(bind_address).map_err(|error| {
             std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "could not determine CodingPet configuration directory",
+                error.kind(),
+                format!("could not bind integration API on {bind_address}: {error}"),
             )
         })?;
-
-        if let Some(parent) = runtime_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let descriptor = RuntimeDescriptor {
-            version: 1,
-            pid: std::process::id(),
-            address: address.to_string(),
-            token: token.clone(),
-        };
-        std::fs::write(&runtime_path, serde_json::to_vec_pretty(&descriptor)?)?;
+        let local_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), INTEGRATION_PORT);
 
         let shutdown = Arc::new(AtomicBool::new(false));
         let thread_shutdown = Arc::clone(&shutdown);
@@ -50,18 +47,22 @@ impl IntegrationServer {
             .spawn(move || {
                 run_server(
                     listener,
-                    token,
                     move |event| proxy.send_event(AppUserEvent::Agent(event)).map_err(|_| ()),
                     thread_shutdown,
                 )
             })?;
 
-        tracing::info!("Integration API listening on http://{address}");
+        if listen_lan {
+            tracing::info!(
+                "Integration API listening on LAN port {INTEGRATION_PORT}; local clients use http://{local_address}"
+            );
+        } else {
+            tracing::info!("Integration API listening on http://{local_address}");
+        }
         Ok(Self {
             shutdown,
             thread: Some(thread),
-            runtime_path,
-            address,
+            address: local_address,
         })
     }
 }
@@ -75,25 +76,17 @@ impl Drop for IntegrationServer {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        // Do not remove a descriptor replaced by a newer CodingPet process.
-        let belongs_to_this_process = std::fs::read(&self.runtime_path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<RuntimeDescriptor>(&bytes).ok())
-            .is_some_and(|descriptor| descriptor.pid == std::process::id());
-        if belongs_to_this_process {
-            let _ = std::fs::remove_file(&self.runtime_path);
-        }
     }
 }
 
-fn run_server<F>(listener: TcpListener, token: String, dispatch: F, shutdown: Arc<AtomicBool>)
+fn run_server<F>(listener: TcpListener, dispatch: F, shutdown: Arc<AtomicBool>)
 where
     F: Fn(AgentEvent) -> Result<(), ()>,
 {
     while !shutdown.load(Ordering::Acquire) {
         match listener.accept() {
             Ok(_) if shutdown.load(Ordering::Acquire) => break,
-            Ok((stream, _)) => handle_connection(stream, &token, &dispatch),
+            Ok((stream, _)) => handle_connection(stream, &dispatch),
             Err(error) => {
                 tracing::warn!("Integration API accept failed: {error}");
                 thread::sleep(Duration::from_millis(100));
@@ -102,7 +95,7 @@ where
     }
 }
 
-fn handle_connection<F>(mut stream: TcpStream, token: &str, dispatch: &F)
+fn handle_connection<F>(mut stream: TcpStream, dispatch: &F)
 where
     F: Fn(AgentEvent) -> Result<(), ()>,
 {
@@ -121,36 +114,100 @@ where
         let _ = write_json_response(&mut stream, 200, "ok");
         return;
     }
-    if request.method != "POST" || request.path != "/v1/events" {
-        let _ = write_json_response(&mut stream, 404, "not found");
-        return;
-    }
-    if request.authorization.as_deref() != Some(token) {
+    if request.authorization.as_deref() != Some(INTEGRATION_TOKEN) {
         let _ = write_json_response(&mut stream, 401, "invalid bearer token");
         return;
     }
+
+    if request.method == "POST" && request.path == "/v1/events" {
+        handle_events(&mut stream, &request, dispatch);
+        return;
+    }
+    if request.method == "POST" {
+        if let Some(configured_hook) = codex_hook_path_name(&request.path) {
+            handle_codex_hook(&mut stream, &request, configured_hook, dispatch);
+            return;
+        }
+    }
+    let _ = write_json_response(&mut stream, 404, "not found");
+}
+
+/// `/v1/codex-hook` or `/v1/codex-hook/<HookEventName>`.
+fn codex_hook_path_name(path: &str) -> Option<Option<&str>> {
+    const ROOT: &str = "/v1/codex-hook";
+    if path == ROOT {
+        return Some(None);
+    }
+    let rest = path.strip_prefix("/v1/codex-hook/")?;
+    if rest.is_empty() || rest.contains('/') {
+        return None;
+    }
+    Some(Some(rest))
+}
+
+fn handle_events<F>(stream: &mut TcpStream, request: &HttpRequest, dispatch: &F)
+where
+    F: Fn(AgentEvent) -> Result<(), ()>,
+{
     if request.content_type.as_deref() != Some("application/json") {
-        let _ = write_json_response(&mut stream, 415, "content-type must be application/json");
+        let _ = write_json_response(stream, 415, "content-type must be application/json");
         return;
     }
 
     let event: AgentEvent = match serde_json::from_slice(&request.body) {
         Ok(event) => event,
         Err(error) => {
-            let _ = write_json_response(&mut stream, 400, &format!("invalid JSON: {error}"));
+            let _ = write_json_response(stream, 400, &format!("invalid JSON: {error}"));
             return;
         }
     };
     if let Err(message) = event.validate() {
-        let _ = write_json_response(&mut stream, 422, &message);
+        let _ = write_json_response(stream, 422, &message);
         return;
     }
 
     if dispatch(event).is_err() {
-        let _ = write_json_response(&mut stream, 503, "pet event loop is unavailable");
+        let _ = write_json_response(stream, 503, "pet event loop is unavailable");
         return;
     }
-    let _ = write_json_response(&mut stream, 202, "accepted");
+    let _ = write_json_response(stream, 202, "accepted");
+}
+
+/// Forward endpoint for remote thin hooks: host applies local config and returns
+/// raw Codex stdout (decision JSON or empty). Fail-open on dispatch errors.
+fn handle_codex_hook<F>(
+    stream: &mut TcpStream,
+    request: &HttpRequest,
+    configured_hook: Option<&str>,
+    dispatch: &F,
+) where
+    F: Fn(AgentEvent) -> Result<(), ()>,
+{
+    if !request.body.is_empty()
+        && request.content_type.as_deref() != Some("application/json")
+    {
+        let _ = write_json_response(stream, 415, "content-type must be application/json");
+        return;
+    }
+
+    let payload: serde_json::Value = if request.body.is_empty() {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        match serde_json::from_slice(&request.body) {
+            Ok(payload) => payload,
+            Err(_) => {
+                // Invalid payloads must not block Codex; return empty stdout.
+                let _ = write_raw_response(stream, 200, b"");
+                return;
+            }
+        }
+    };
+
+    let outcome = process_codex_hook(&payload, configured_hook);
+    if let Some(event) = outcome.event {
+        let _ = dispatch(event);
+    }
+    let _ = write_raw_response(stream, 200, &outcome.stdout);
 }
 
 struct HttpRequest {
@@ -254,6 +311,23 @@ fn find_header_end(bytes: &[u8]) -> Option<usize> {
 }
 
 fn write_json_response(stream: &mut TcpStream, status: u16, message: &str) -> std::io::Result<()> {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "ok": status < 400,
+        "message": message,
+    }))?;
+    write_response(stream, status, "application/json", &body)
+}
+
+fn write_raw_response(stream: &mut TcpStream, status: u16, body: &[u8]) -> std::io::Result<()> {
+    write_response(stream, status, "application/json", body)
+}
+
+fn write_response(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
         202 => "Accepted",
@@ -266,24 +340,12 @@ fn write_json_response(stream: &mut TcpStream, status: u16, message: &str) -> st
         503 => "Service Unavailable",
         _ => "Error",
     };
-    let body = serde_json::to_vec(&serde_json::json!({
-        "ok": status < 400,
-        "message": message,
-    }))?;
     write!(
         stream,
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     )?;
-    stream.write_all(&body)
-}
-
-fn generate_token() -> Result<String, std::io::Error> {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes)
-        .map_err(|error| std::io::Error::other(format!("secure random failed: {error}")))?;
-
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+    stream.write_all(body)
 }
 
 #[cfg(test)]
@@ -297,11 +359,14 @@ mod tests {
     }
 
     #[test]
-    fn generated_tokens_are_random_and_fixed_length() {
-        let first = generate_token().unwrap();
-        let second = generate_token().unwrap();
-        assert_eq!(first.len(), 64);
-        assert_ne!(first, second);
+    fn parses_codex_hook_paths() {
+        assert_eq!(codex_hook_path_name("/v1/codex-hook"), Some(None));
+        assert_eq!(
+            codex_hook_path_name("/v1/codex-hook/PermissionRequest"),
+            Some(Some("PermissionRequest"))
+        );
+        assert_eq!(codex_hook_path_name("/v1/codex-hook/"), None);
+        assert_eq!(codex_hook_path_name("/v1/events"), None);
     }
 
     #[test]
@@ -313,7 +378,8 @@ mod tests {
             let mut stream = TcpStream::connect(address).unwrap();
             write!(
                 stream,
-                "POST /v1/events HTTP/1.1\r\nAuthorization: Bearer test-token\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                "POST /v1/events HTTP/1.1\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                INTEGRATION_TOKEN,
                 body.len(),
                 body
             )
@@ -325,13 +391,42 @@ mod tests {
 
         let (events_tx, events_rx) = mpsc::channel();
         let (stream, _) = listener.accept().unwrap();
-        handle_connection(stream, "test-token", &|event| {
-            events_tx.send(event).map_err(|_| ())
-        });
+        handle_connection(stream, &|event| events_tx.send(event).map_err(|_| ()));
 
         let event = events_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(event.source, "codex");
         assert_eq!(event.event, "agent.turn.started");
         assert!(client.join().unwrap().starts_with("HTTP/1.1 202"));
+    }
+
+    #[test]
+    fn codex_hook_forward_returns_raw_stdout_body() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let body = r#"{"hook_event_name":"UserPromptSubmit","turn_id":"t1"}"#;
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            write!(
+                stream,
+                "POST /v1/codex-hook HTTP/1.1\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                INTEGRATION_TOKEN,
+                body.len(),
+                body
+            )
+            .unwrap();
+            let mut response = Vec::new();
+            stream.read_to_end(&mut response).unwrap();
+            response
+        });
+
+        let (events_tx, events_rx) = mpsc::channel();
+        let (stream, _) = listener.accept().unwrap();
+        handle_connection(stream, &|event| events_tx.send(event).map_err(|_| ()));
+
+        let event = events_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(event.event, "agent.turn.started");
+        let response = String::from_utf8(client.join().unwrap()).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert!(response.ends_with("\r\n\r\n") || response.contains("Content-Length: 0"));
     }
 }

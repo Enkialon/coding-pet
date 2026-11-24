@@ -403,7 +403,6 @@ dependencies = [
  "egui-components",
  "egui-wgpu",
  "egui-winit",
- "getrandom 0.3.4",
  "image",
  "objc2-app-kit 0.3.2",
  "pixels",

@@ -88,6 +88,8 @@ impl PetApp {
             base_animation: PetAnimation::Idle,
             pending_animation: None,
             loop_idle: config.loop_idle,
+            auto_approve_permissions: config.auto_approve_permissions,
+            integration_listen_lan: config.integration_listen_lan,
             look_range: config.look_range.clamp(80, 600) as i32,
             display_scale: config
                 .display_scale
@@ -530,6 +532,8 @@ impl PetApp {
         config.always_on_top = self.tray.as_ref().is_some_and(|t| t.always_on_top);
         config.idle_animation = self.ambient_timer.is_enabled();
         config.loop_idle = self.loop_idle;
+        config.auto_approve_permissions = self.auto_approve_permissions;
+        config.integration_listen_lan = self.integration_listen_lan;
         config.look_range = self.look_range.max(0) as u32;
         config.display_scale = self.display_scale;
         config.pointer_poll_ms = self.pointer_poll_ms;
@@ -573,6 +577,8 @@ impl PetApp {
             loop_idle: self.loop_idle,
             idle_animation: self.ambient_timer.is_enabled(),
             always_on_top: self.tray.as_ref().is_some_and(|t| t.always_on_top),
+            auto_approve_permissions: self.auto_approve_permissions,
+            integration_listen_lan: self.integration_listen_lan,
         };
         let anchor = if from_pet {
             let (x, y) = self
@@ -631,6 +637,12 @@ impl PetApp {
             if let Some(win) = &self.window {
                 win.set_always_on_top(enabled);
             }
+        }
+        if let Some(enabled) = patch.auto_approve_permissions {
+            self.auto_approve_permissions = enabled;
+        }
+        if let Some(enabled) = patch.integration_listen_lan {
+            self.integration_listen_lan = enabled;
         }
         if patch.save {
             self.save_config();

@@ -18,26 +18,16 @@ needs an adapter that maps its lifecycle names to the canonical event names belo
 
 ## Discovery and security
 
-At startup CodingPet binds to a random port on `127.0.0.1` and writes:
+The integration API listens on a fixed local endpoint:
 
 ```text
-%APPDATA%\CodingPet\config\integration.json
+http://127.0.0.1:18765
+Authorization: Bearer coding-pet
 ```
 
-Example:
-
-```json
-{
-  "version": 1,
-  "pid": 1234,
-  "address": "127.0.0.1:49152",
-  "token": "64-character-random-token"
-}
-```
-
-Clients must send the token as `Authorization: Bearer <token>`. CodingPet refuses non-loopback
-addresses, accepts only JSON, limits each request to 64 KiB, and never enables browser CORS.
-Do not copy `integration.json` into logs or repositories.
+With **局域网集成** enabled it also accepts LAN clients on port `18765` (same token). Clients
+must send the bearer token, use JSON, stay within 64 KiB per request, and should not expose the
+API to the public internet.
 
 ## Recommended client: the built-in emitter
 
@@ -50,8 +40,8 @@ coding-pet emit agent.turn.completed --source cursor --data '{"duration_ms":1200
 ```
 
 Available options are `--source`, `--id`, `--session`, `--cwd`, `--message`, `--timestamp`, and
-`--data`. `--data` must be a JSON object. The emitter discovers the port and token automatically,
-uses short timeouts, and exits non-zero when delivery fails.
+`--data`. `--data` must be a JSON object. The emitter talks to `127.0.0.1:18765` with the fixed
+token, uses short timeouts, and exits non-zero when delivery fails.
 
 Adapters that already produce the canonical envelope can pipe one event through standard input:
 

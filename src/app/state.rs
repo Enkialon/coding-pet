@@ -29,6 +29,10 @@ pub(super) struct PetApp {
     /// Whether idle should loop. Owned here so a future settings page can
     /// toggle it without waiting for the next config reload.
     pub(super) loop_idle: bool,
+    /// Auto-allow Codex `PermissionRequest` approvals via the hook adapter.
+    pub(super) auto_approve_permissions: bool,
+    /// Bind the integration API for LAN forward hooks. Applied on next launch.
+    pub(super) integration_listen_lan: bool,
     pub(super) look_range: i32,
     pub(super) display_scale: f64,
     /// How often to sample the global cursor for the awareness ring.

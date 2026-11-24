@@ -1,7 +1,8 @@
+use super::codex_hook::process_codex_hook;
 use super::event::AgentEvent;
-use super::runtime::{runtime_path, RuntimeDescriptor};
+use super::server::{INTEGRATION_PORT, INTEGRATION_TOKEN};
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::time::Duration;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
@@ -33,74 +34,21 @@ pub fn try_run_cli() -> CliOutcome {
     CliOutcome::Handled(result)
 }
 
-/// Translate a Codex hook payload into the provider-neutral event envelope.
-/// Hook delivery is deliberately fail-open: telemetry must never block Codex.
+/// Local Codex adapter: same host-side logic as `POST /v1/codex-hook`.
+/// Fail-open: transport errors never change the coding session outcome.
 fn run_codex_hook(configured_hook_name: Option<String>) -> Result<(), String> {
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
     let payload: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
-    let hook_name = payload
-        .get("hook_event_name")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned)
-        .or(configured_hook_name);
-    let Some(hook_name) = hook_name else {
-        return Ok(());
-    };
-    let Some(event_name) = codex_event_name(&hook_name) else {
-        return Ok(());
-    };
-
-    let mut event = AgentEvent::new("codex", event_name);
-    event.id = string_field(&payload, "turn_id");
-    event.session_id = string_field(&payload, "session_id");
-    event.cwd = string_field(&payload, "cwd");
-    let mut data = serde_json::Map::new();
-    data.insert("hook".into(), serde_json::Value::String(hook_name));
-    for field in [
-        "tool_name",
-        "model",
-        "source",
-        "reason",
-        "agent_id",
-        "agent_type",
-    ] {
-        if let Some(value) = string_field(&payload, field) {
-            data.insert(field.into(), serde_json::Value::String(value));
-        }
+    let outcome = process_codex_hook(&payload, configured_hook_name.as_deref());
+    if !outcome.stdout.is_empty() {
+        let _ = std::io::stdout().write_all(&outcome.stdout);
+        let _ = writeln!(std::io::stdout());
     }
-    event.data = serde_json::Value::Object(data);
-
-    // Ignore validation and transport failures so a visual accessory can
-    // never change the outcome of a coding session.
-    if event.validate().is_ok() {
+    if let Some(event) = outcome.event {
         let _ = send_event(&event);
     }
     Ok(())
-}
-
-fn codex_event_name(hook_name: &str) -> Option<&'static str> {
-    match hook_name {
-        "SessionStart" => Some("agent.session.started"),
-        "SessionEnd" => Some("agent.session.ended"),
-        "UserPromptSubmit" => Some("agent.turn.started"),
-        "PreToolUse" => Some("agent.tool.started"),
-        "PostToolUse" => Some("agent.tool.completed"),
-        "PermissionRequest" => Some("agent.permission.required"),
-        "PreCompact" => Some("agent.review.started"),
-        "PostCompact" => Some("agent.turn.started"),
-        "SubagentStart" => Some("agent.task.started"),
-        "SubagentStop" => Some("agent.task.completed"),
-        "Stop" => Some("agent.turn.completed"),
-        _ => None,
-    }
-}
-
-fn string_field(payload: &serde_json::Value, field: &str) -> Option<String> {
-    payload
-        .get(field)
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned)
 }
 
 fn build_event(args: Vec<String>) -> Result<AgentEvent, String> {
@@ -153,26 +101,7 @@ fn read_event_from_stdin() -> Result<AgentEvent, String> {
 }
 
 fn send_event(event: &AgentEvent) -> Result<(), String> {
-    let path = runtime_path().ok_or("could not determine CodingPet configuration directory")?;
-    let descriptor: RuntimeDescriptor =
-        serde_json::from_slice(&std::fs::read(&path).map_err(|_| {
-            "CodingPet is not running (integration.json was not found)".to_string()
-        })?)
-        .map_err(|error| format!("invalid integration.json: {error}"))?;
-    if descriptor.version != 1 {
-        return Err(format!(
-            "unsupported integration runtime version {}",
-            descriptor.version
-        ));
-    }
-    let address: SocketAddr = descriptor
-        .address
-        .parse()
-        .map_err(|_| "integration.json contains an invalid address".to_string())?;
-    if !address.ip().is_loopback() {
-        return Err("refusing to send an integration event to a non-loopback address".into());
-    }
-
+    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, INTEGRATION_PORT));
     let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
         .map_err(|error| format!("could not connect to CodingPet: {error}"))?;
     let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
@@ -180,9 +109,7 @@ fn send_event(event: &AgentEvent) -> Result<(), String> {
     let body = serde_json::to_vec(event).map_err(|error| error.to_string())?;
     write!(
         stream,
-        "POST /v1/events HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        descriptor.address,
-        descriptor.token,
+        "POST /v1/events HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {INTEGRATION_TOKEN}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     )
     .and_then(|_| stream.write_all(&body))
@@ -227,25 +154,5 @@ mod tests {
         assert_eq!(event.source, "claude-code");
         assert_eq!(event.session_id.as_deref(), Some("session-1"));
         assert_eq!(event.data["duration_ms"], 42);
-    }
-
-    #[test]
-    fn maps_all_supported_codex_hooks() {
-        let cases = [
-            ("SessionStart", "agent.session.started"),
-            ("SessionEnd", "agent.session.ended"),
-            ("UserPromptSubmit", "agent.turn.started"),
-            ("PreToolUse", "agent.tool.started"),
-            ("PostToolUse", "agent.tool.completed"),
-            ("PermissionRequest", "agent.permission.required"),
-            ("PreCompact", "agent.review.started"),
-            ("PostCompact", "agent.turn.started"),
-            ("SubagentStart", "agent.task.started"),
-            ("SubagentStop", "agent.task.completed"),
-            ("Stop", "agent.turn.completed"),
-        ];
-        for (hook, expected) in cases {
-            assert_eq!(codex_event_name(hook), Some(expected));
-        }
     }
 }

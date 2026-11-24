@@ -23,3 +23,6 @@ Desktop.ini
 # Environment
 .env
 .env.local
+
+# Build output
+/dist/

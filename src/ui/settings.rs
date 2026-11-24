@@ -17,7 +17,7 @@ use crate::config::{MAX_DISPLAY_SCALE, MIN_DISPLAY_SCALE};
 use crate::locale::{settings_strings, Locale};
 
 const WINDOW_WIDTH: f64 = 480.0;
-const WINDOW_HEIGHT: f64 = 620.0;
+const WINDOW_HEIGHT: f64 = 700.0;
 const WINDOW_CONTROLS_HEIGHT: f32 = 36.0;
 const WINDOW_CORNER_RADIUS: f32 = 16.0;
 
@@ -29,6 +29,8 @@ pub struct SettingsValues {
     pub loop_idle: bool,
     pub idle_animation: bool,
     pub always_on_top: bool,
+    pub auto_approve_permissions: bool,
+    pub integration_listen_lan: bool,
 }
 
 #[derive(Default)]
@@ -39,6 +41,8 @@ pub struct SettingsPatch {
     pub loop_idle: Option<bool>,
     pub idle_animation: Option<bool>,
     pub always_on_top: Option<bool>,
+    pub auto_approve_permissions: Option<bool>,
+    pub integration_listen_lan: Option<bool>,
     pub save: bool,
     pub close: bool,
     drag_window: bool,
@@ -271,6 +275,26 @@ fn paint_ui(
                         patch.always_on_top = Some(values.always_on_top);
                         patch.save = true;
                     }
+                    ui.add_space(6.0);
+                    if switch_row(
+                        ui,
+                        strings.auto_approve_permissions,
+                        strings.auto_approve_permissions_description,
+                        &mut values.auto_approve_permissions,
+                    ) {
+                        patch.auto_approve_permissions = Some(values.auto_approve_permissions);
+                        patch.save = true;
+                    }
+                    ui.add_space(6.0);
+                    if switch_row(
+                        ui,
+                        strings.integration_listen_lan,
+                        strings.integration_listen_lan_description,
+                        &mut values.integration_listen_lan,
+                    ) {
+                        patch.integration_listen_lan = Some(values.integration_listen_lan);
+                        patch.save = true;
+                    }
                 });
 
             ui.add_space(10.0);
@@ -442,6 +466,8 @@ mod tests {
                 loop_idle: true,
                 idle_animation: true,
                 always_on_top: false,
+                auto_approve_permissions: false,
+                integration_listen_lan: false,
             };
 
             let _ = ctx.run_ui(input.clone(), |ui| {

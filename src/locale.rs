@@ -102,6 +102,10 @@ pub struct SettingsStrings {
     pub idle_animation_description: &'static str,
     pub always_on_top: &'static str,
     pub always_on_top_description: &'static str,
+    pub auto_approve_permissions: &'static str,
+    pub auto_approve_permissions_description: &'static str,
+    pub integration_listen_lan: &'static str,
+    pub integration_listen_lan_description: &'static str,
     pub auto_save: &'static str,
 }
 
@@ -171,6 +175,10 @@ pub fn settings_strings(locale: Locale) -> SettingsStrings {
             idle_animation_description: "偶尔做一个小动作陪伴你",
             always_on_top: "保持在最前面",
             always_on_top_description: "让宠物不会被其他窗口挡住",
+            auto_approve_permissions: "默认同意所有审批",
+            auto_approve_permissions_description: "自动放行 Codex 权限审批；提问类确认不处理",
+            integration_listen_lan: "局域网集成",
+            integration_listen_lan_description: "允许 192 网段远程 hook 转发到本机；改后需重启",
             auto_save: "所有改动都会自动保存",
         },
         Locale::En => SettingsStrings {
@@ -191,6 +199,12 @@ pub fn settings_strings(locale: Locale) -> SettingsStrings {
             idle_animation_description: "Occasionally perform a small companion action",
             always_on_top: "Keep in front",
             always_on_top_description: "Prevent other windows from covering the pet",
+            auto_approve_permissions: "Auto-approve permissions",
+            auto_approve_permissions_description:
+                "Allow Codex permission requests automatically; question prompts stay manual",
+            integration_listen_lan: "LAN integration",
+            integration_listen_lan_description:
+                "Allow remote hooks on the 192.x LAN to forward here; restart required",
             auto_save: "Every change is saved automatically",
         },
     }
